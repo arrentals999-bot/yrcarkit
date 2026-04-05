@@ -1,0 +1,24 @@
+# Qt runtime binaries (don't need versioning - these are shipped with YRCARKIT.exe)
+*.dll
+opengl32sw.dll
+D3Dcompiler_47.dll
+
+# Qt plugin dirs
+iconengines/
+imageformats/
+platforms/
+sqldrivers/
+
+# Temp / log files
+*.log
+*.tmp
+*~
+
+# Python
+__pycache__/
+*.pyc
+
+# OS junk
+Thumbs.db
+Desktop.ini
+.DS_Store
