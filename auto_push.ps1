@@ -10,18 +10,20 @@ function Log($msg) {
 
 Set-Location $repo
 
-# Any changes? (tracked OR untracked)
-$changes = git status --porcelain 2>&1
-if (-not $changes) {
-    Log "No changes."
+# Stage only .db files (new, modified, deleted)
+git add -A -- "*.db" 2>&1 | Out-Null
+
+# Any staged .db changes?
+$staged = git diff --cached --name-only 2>&1
+if (-not $staged) {
+    Log "No DB changes."
     exit 0
 }
 
-$fileCount = ($changes | Measure-Object).Count
-Log "Detected $fileCount changed file(s). Committing..."
+$fileCount = ($staged | Measure-Object).Count
+Log "Detected $fileCount changed DB file(s). Committing..."
 
-git add -A 2>&1 | Out-Null
-$msg = "Auto-sync $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') - $fileCount file(s)"
+$msg = "Auto-sync $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') - $fileCount DB file(s)"
 $commitOut = git commit -m $msg 2>&1
 Log ($commitOut -join " | ")
 
