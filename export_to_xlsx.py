@@ -118,14 +118,20 @@ def find_target_discharge(cycles):
     """
     Pick the last complete discharge:
       - If last table is Charge  -> 2nd-to-last  (should be Discharge)
-      - If last table is Discharge -> 3rd-to-last (should be Discharge)
+      - If last table is Discharge and >=3 cycles -> 3rd-to-last (prev Discharge)
+      - If only 1 cycle and it's Discharge -> use it (only available data)
     """
-    if len(cycles) < 2:
+    if not cycles:
         return None
     last = cycles[-1]
     if last["kind"] == "C":
+        if len(cycles) < 2:
+            return None
         target = cycles[-2]
     else:
+        # Last is discharge — if it's the only cycle, use it
+        if len(cycles) == 1:
+            return last
         if len(cycles) < 3:
             return None
         target = cycles[-3]
