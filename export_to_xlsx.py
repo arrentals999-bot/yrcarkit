@@ -208,14 +208,47 @@ def main():
     if not sessions:
         print("No sessions found!"); return
 
-    latest_key = max(sessions.keys())
-    latest = sessions[latest_key]
+    # 2. Display all sessions with channels and cycle counts
+    sorted_keys = sorted(sessions.keys())
+    print(f"\n{'─' * 70}")
+    print(f"  Found {len(sorted_keys)} session(s) across all channels")
+    print(f"{'─' * 70}")
+
+    for idx, key in enumerate(sorted_keys, start=1):
+        s = sessions[key]
+        chs = sorted(s["channels"].keys())
+        print(f"\n  [{idx}]  Session: {key}  ({s['date']})  —  {len(chs)} channel(s): {chs}")
+
+        for ch in chs:
+            cycles = read_cycles(s["channels"][ch])
+            num_charge = sum(1 for c in cycles if c["kind"] == "C")
+            num_discharge = count_discharge_cycles(cycles)
+            total = len(cycles)
+            target = find_target_discharge(cycles)
+            cap_str = f"{target['cap_ah']}Ah" if target else "--"
+            ir_str = f"{target['ir_mohm']}mOhm" if target and target["ir_mohm"] else "--"
+            print(f"        CH{ch}: {total} cycles ({num_discharge}D/{num_charge}C)  "
+                  f"|  cap={cap_str}  IR={ir_str}")
+
+    print(f"\n{'─' * 70}")
+
+    # 3. Let user pick a session
+    choice = input(f"\nSelect session [1-{len(sorted_keys)}] (Enter = {len(sorted_keys)} latest): ").strip()
+    if not choice:
+        chosen_idx = len(sorted_keys) - 1
+    else:
+        if not choice.isdigit() or int(choice) < 1 or int(choice) > len(sorted_keys):
+            print("Invalid choice."); return
+        chosen_idx = int(choice) - 1
+
+    chosen_key = sorted_keys[chosen_idx]
+    latest = sessions[chosen_key]
     all_channels = sorted(latest["channels"].keys())
 
-    print(f"\nMost recent session: {latest_key}  ({latest['date']})")
-    print(f"  Channels found: {all_channels}")
+    print(f"\n  Selected: {chosen_key}  ({latest['date']})")
+    print(f"  Channels: {all_channels}")
 
-    # Ask which channels to skip
+    # 4. Ask which channels to skip
     skip_input = input("\nChannels to skip (e.g. 3 or 3,5 or press Enter for none): ").strip()
     skip_channels = set()
     if skip_input:
@@ -228,7 +261,7 @@ def main():
         print(f"  Skipping: {sorted(skip_channels)}")
     print(f"  Active channels: {active_channels}  ({len(active_channels)} total)")
 
-    # 2. Analyze each channel
+    # 5. Analyze each channel
     print("\nCycle analysis:")
     results = {}
     all_ok = True
@@ -254,7 +287,7 @@ def main():
                 "v_end": target["v_end"],
                 "dur_s": target["dur_s"],
                 "date": latest["date"],
-                "session": latest_key,
+                "session": chosen_key,
                 "ch": ch,
             }
 

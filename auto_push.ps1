@@ -1,4 +1,6 @@
 # Auto-commit + push YRCARKIT changes to GitHub
+# Scans the entire repo folder and pushes any tracked + new files
+# (respects .gitignore for build artifacts, dlls, etc.)
 # Runs silently. Logs to auto_push.log in the repo root.
 
 $repo = "C:\Users\ratha\Downloads\RATAN YRCARKIT\YRCARKIT"
@@ -10,20 +12,32 @@ function Log($msg) {
 
 Set-Location $repo
 
-# Stage only .db files (new, modified, deleted)
-git add -A -- "*.db" 2>&1 | Out-Null
+# Stage every change in the repo (new, modified, deleted)
+# .gitignore filters out the noise (dlls, __pycache__, *.log, etc.)
+git add -A 2>&1 | Out-Null
 
-# Any staged .db changes?
+# Any staged changes at all?
 $staged = git diff --cached --name-only 2>&1
 if (-not $staged) {
-    Log "No DB changes."
+    Log "No changes."
     exit 0
 }
 
 $fileCount = ($staged | Measure-Object).Count
-Log "Detected $fileCount changed DB file(s). Committing..."
+Log "Detected $fileCount changed file(s). Committing..."
 
-$msg = "Auto-sync $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') - $fileCount DB file(s)"
+# Categorize for a more descriptive commit message
+$dbCount    = ($staged | Where-Object { $_ -like "*.db" }    | Measure-Object).Count
+$xlsxCount  = ($staged | Where-Object { $_ -like "*.xlsx" }  | Measure-Object).Count
+$otherCount = $fileCount - $dbCount - $xlsxCount
+
+$parts = @()
+if ($dbCount    -gt 0) { $parts += "$dbCount db" }
+if ($xlsxCount  -gt 0) { $parts += "$xlsxCount xlsx" }
+if ($otherCount -gt 0) { $parts += "$otherCount other" }
+$summary = $parts -join ", "
+
+$msg = "Auto-sync $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') - $summary"
 $commitOut = git commit -m $msg 2>&1
 Log ($commitOut -join " | ")
 
