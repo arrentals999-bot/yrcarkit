@@ -41,18 +41,11 @@ $msg = "Auto-sync $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') - $summary"
 $commitOut = git commit -m $msg 2>&1
 Log ($commitOut -join " | ")
 
-# Pull --rebase first so a remote-only commit can't jam future pushes.
-# --autostash handles the race where live YRCARKIT.exe writes more bytes
-# to a .db file between our commit and this rebase step.
-Log "Rebasing on origin/main..."
-$pullOut = git pull --rebase --autostash origin main 2>&1
-Log ($pullOut -join " | ")
-if ($LASTEXITCODE -ne 0) {
-    Log "Rebase failed with exit code $LASTEXITCODE - aborting and bailing out"
-    git rebase --abort 2>&1 | Out-Null
-    exit 1
-}
-
+# Push directly. We deliberately do NOT git pull --rebase here: while
+# YRCARKIT.exe is running it holds .db files open, and Windows blocks
+# git from unlinking them during a rebase reset. So if the remote ever
+# moves ahead independently, we just log a loud warning and require
+# manual reconciliation when the charger is idle.
 Log "Pushing to origin/main..."
 $pushOut = git push origin main 2>&1
 Log ($pushOut -join " | ")
@@ -61,4 +54,7 @@ if ($LASTEXITCODE -eq 0) {
     Log "Push complete."
 } else {
     Log "Push failed with exit code $LASTEXITCODE"
+    if ($pushOut -match "rejected" -or $pushOut -match "non-fast-forward" -or $pushOut -match "fetch first") {
+        Log "ACTION NEEDED: remote diverged. Stop YRCARKIT.exe, then run 'git pull --rebase origin main && git push origin main' from the repo."
+    }
 }
