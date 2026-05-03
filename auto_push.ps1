@@ -41,9 +41,11 @@ $msg = "Auto-sync $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') - $summary"
 $commitOut = git commit -m $msg 2>&1
 Log ($commitOut -join " | ")
 
-# Pull --rebase first so a remote-only commit can't jam future pushes
+# Pull --rebase first so a remote-only commit can't jam future pushes.
+# --autostash handles the race where live YRCARKIT.exe writes more bytes
+# to a .db file between our commit and this rebase step.
 Log "Rebasing on origin/main..."
-$pullOut = git pull --rebase origin main 2>&1
+$pullOut = git pull --rebase --autostash origin main 2>&1
 Log ($pullOut -join " | ")
 if ($LASTEXITCODE -ne 0) {
     Log "Rebase failed with exit code $LASTEXITCODE - aborting and bailing out"
