@@ -41,6 +41,16 @@ $msg = "Auto-sync $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') - $summary"
 $commitOut = git commit -m $msg 2>&1
 Log ($commitOut -join " | ")
 
+# Pull --rebase first so a remote-only commit can't jam future pushes
+Log "Rebasing on origin/main..."
+$pullOut = git pull --rebase origin main 2>&1
+Log ($pullOut -join " | ")
+if ($LASTEXITCODE -ne 0) {
+    Log "Rebase failed with exit code $LASTEXITCODE - aborting and bailing out"
+    git rebase --abort 2>&1 | Out-Null
+    exit 1
+}
+
 Log "Pushing to origin/main..."
 $pushOut = git push origin main 2>&1
 Log ($pushOut -join " | ")
