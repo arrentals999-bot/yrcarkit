@@ -1,4 +1,4 @@
-# YRCARKIT Battery Manager
+# Ratan's Private Battery Manager
 
 Local web UI for managing Prius hybrid battery module testing data from YRCARKIT.
 

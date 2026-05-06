@@ -387,6 +387,68 @@ def api_thresholds():
 
 # ----------------------- API: dashboard summary -----------------------
 
+@app.get("/api/live")
+def api_live():
+    """Real-time view of the in-progress YRCARKIT session.
+    Returns is_live=True if any DB in the latest session was modified
+    within the last 5 minutes.
+    """
+    import time
+    sessions = db.scan_sessions()
+    if not sessions:
+        return jsonify({"is_live": False, "session": None, "channels": []})
+
+    latest = sessions[-1]
+    label = db.get_session_label(latest["session_key"])
+    skip = {3}
+    if label:
+        try:
+            skip = set(json.loads(label["skip_channels"]))
+        except Exception:
+            skip = {3}
+
+    channels_out = []
+    most_recent_mtime = 0
+    for ch in latest["channels"]:
+        if ch in skip:
+            continue
+        fp = latest["channel_paths"][ch]
+        live = db.read_live_state_for_channel(fp)
+        if not live:
+            continue
+        most_recent_mtime = max(most_recent_mtime, live["file_mtime"])
+        age_s = int(time.time() - live["file_mtime"])
+        # human label for cycle position
+        # For 5-cycle session, charge tables = C002,C004,C006,C008,C010 → cycles 1-5
+        # discharge tables = F001,F003,F005,F007,F009 → cycles 1-5
+        cycle_n = (live["current_seq"] + 1) // 2  # rough cycle number
+        channels_out.append({
+            "channel":             ch,
+            "current_table":       live["current_table"],
+            "current_phase":       live["current_phase"],
+            "current_cycle":       cycle_n,
+            "completed_charge":    live["completed_charge_cycles"],
+            "completed_discharge": live["completed_discharge_cycles"],
+            "current_vol":         live["current_vol"],
+            "current_cur":         live["current_cur"],
+            "current_cap":         live["current_cap"],
+            "elapsed_in_table_s":  live["elapsed_in_table_s"],
+            "row_count":           live["row_count"],
+            "is_resting":          (live.get("current_procedure") in (2, 4) or
+                                    (live["current_cur"] is not None and abs(live["current_cur"]) < 0.1)),
+            "age_s":               age_s,
+        })
+
+    is_live = (time.time() - most_recent_mtime) < 300 if most_recent_mtime else False
+    return jsonify({
+        "is_live":         is_live,
+        "session_key":     latest["session_key"],
+        "session_started": latest["started"],
+        "battery_label":   label["battery"] if label else None,
+        "channels":        channels_out,
+    })
+
+
 @app.get("/api/dashboard")
 def api_dashboard():
     pool = db.build_module_pool()

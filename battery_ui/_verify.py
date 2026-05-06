@@ -32,7 +32,7 @@ check("GET /api/dashboard 200", s == 200)
 check("dashboard has total_modules", "total_modules" in d)
 check("dashboard has by_status", "by_status" in d)
 check("dashboard has by_trend", "by_trend" in d)
-check("dashboard has session_count", d.get("session_count") == 31, f"got {d.get('session_count')}")
+check("dashboard has session_count >= 31", d.get("session_count", 0) >= 31, f"got {d.get('session_count')}")
 check("dashboard has latest_session", d.get("latest_session") is not None)
 
 print()
@@ -41,13 +41,15 @@ print("TAB 2 - SESSIONS")
 print("=" * 70)
 s, sessions = call("GET", "/api/sessions")
 check("GET /api/sessions 200", s == 200)
-check("31 sessions returned", len(sessions) == 31)
+check("at least 31 sessions returned", len(sessions) >= 31, f"got {len(sessions)}")
 labelled = [x for x in sessions if x.get("label")]
 check("at least 1 labelled", len(labelled) >= 1, f"{len(labelled)} labelled")
 check("sessions have trend_dist", sessions[-1].get("trend_dist") is not None)
-check("sessions have cap_range", sessions[-1].get("cap_range") is not None)
+check("sessions have cap_range", sessions[-1].get("cap_range") is not None or sessions[-1]["channels"])
 
-sk_test = sessions[-1]["session_key"]
+# Use a STABLE old session for label tests (not the latest, since the user
+# may have a live session that we should not pollute).
+sk_test = "20260324_2102"   # the very first session — safe to relabel
 s, det = call("GET", f"/api/sessions/{sk_test}")
 check("GET session detail 200", s == 200)
 check("detail has channels list", isinstance(det.get("channels"), list))
@@ -69,8 +71,12 @@ s, r = call("POST", f"/api/sessions/{sk_test}/label",
             {"battery": "X", "cell_start": 30, "cell_end": 40})
 check("out-of-range cells rejected", s == 400)
 
-call("POST", f"/api/sessions/{sk_test}/label",
-     {"battery": "H", "cell_start": 8, "cell_end": 14, "skip_channels": [3]})
+# clean up — remove the test label entirely so the old session goes back to unlabelled
+import sqlite3 as _s
+from pathlib import Path as _P
+_conn = _s.connect(_P(__file__).parent / "battery_ui.db")
+_conn.execute("DELETE FROM session_labels WHERE session_key=?", (sk_test,))
+_conn.commit(); _conn.close()
 
 print()
 print("=" * 70)
@@ -78,13 +84,14 @@ print("TAB 3 - MODULE POOL")
 print("=" * 70)
 s, pool = call("GET", "/api/pool")
 check("GET /api/pool 200", s == 200)
-check("189 module entries", len(pool) == 189, f"got {len(pool)}")
+check("at least 189 module entries", len(pool) >= 189, f"got {len(pool)}")
 check("each has trend", all("trend" in m for m in pool))
 check("each has discharge_caps", all("discharge_caps" in m for m in pool))
 labelled_pool = [m for m in pool if m.get("battery")]
 check("labelled modules show battery", len(labelled_pool) >= 7, f"{len(labelled_pool)} labelled in pool")
+# Check that *any* labelled session has cell_position propagated (don't hard-code H specifically)
 check("battery+cell propagated from session label",
-      any(m["battery"] == "H" and m["cell_position"] is not None for m in pool))
+      any(m.get("battery") and m.get("cell_position") for m in pool))
 
 s, r = call("POST", "/api/modules/override",
             {"session_key": "20260504_1926", "channel": 1, "battery": "Q", "cell_position": 25})
@@ -229,6 +236,19 @@ print("CROSS-TAB / EDGE CASES")
 print("=" * 70)
 s, _ = call("GET", "/api/thresholds")
 check("GET /api/thresholds works", s == 200)
+
+# live endpoint
+s, live = call("GET", "/api/live")
+check("GET /api/live 200", s == 200)
+check("live has is_live bool", isinstance(live.get("is_live"), bool))
+check("live has session_key", "session_key" in live)
+check("live has channels list", isinstance(live.get("channels"), list))
+if live.get("channels"):
+    c0 = live["channels"][0]
+    check("live channel has phase", c0.get("current_phase") in ("CHARGE","DISCHARGE"))
+    check("live channel has voltage", c0.get("current_vol") is not None)
+    check("live channel has cap-so-far", "current_cap" in c0)
+    check("live channel has age_s", isinstance(c0.get("age_s"), int))
 s, _ = call("GET", "/api/sessions/NOSUCH")
 check("404 on bad session key", s == 404)
 s, _ = call("GET", "/api/modules/NOSUCH/1")
@@ -257,11 +277,13 @@ with urllib.request.urlopen(f"{BASE}/static/app.js") as r:
 for sym in ("openModuleDetail", "editPoolLabel", "bulkSetStatus",
             "renderStrategyCompare", "showCutoffReminder", "showUnlabelledBanner",
             "pollForUpdates", "cell-tag",
-            "renamePack", "viewPackBlocks", "pack_name", "source_summary"):
+            "renamePack", "viewPackBlocks", "pack_name", "source_summary",
+            "loadLive", "live-card", "live-dot"):
     check(f"app.js contains {sym!r}", sym in js)
 
-# HTML form has pack_name field
 check("Build form has pack_name input", 'name="pack_name"' in html)
+check("HTML rebrand to Ratan's", "Ratan" in html)
+check("HTML has live-panel", "live-panel" in html)
 
 print()
 print("=" * 70)

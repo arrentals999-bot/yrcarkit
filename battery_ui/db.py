@@ -184,6 +184,69 @@ def read_cycles_for_channel(filepath):
     return cycles
 
 
+def read_live_state_for_channel(filepath):
+    """For the LATEST table in this DB, return what's currently happening:
+    last sample's vol/cur/cap/tim, total tables completed, etc. Used by /api/live."""
+    import os
+    conn = sqlite3.connect(filepath)
+    cur = conn.cursor()
+    cur.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+    tables = [r[0] for r in cur.fetchall()]
+    if not tables:
+        conn.close()
+        return None
+
+    # Sort tables by sequence number — same logic as read_cycles_for_channel
+    parsed = []
+    for t in tables:
+        m = re.match(r"([CF])(\d+)_CH", t)
+        if m:
+            parsed.append((int(m.group(2)), m.group(1), t))
+    parsed.sort()
+    if not parsed:
+        conn.close()
+        return None
+
+    seq, kind, current_table = parsed[-1]
+    completed_tables = len(parsed) - 1
+    completed_charge    = sum(1 for s, k, _ in parsed[:-1] if k == "C")
+    completed_discharge = sum(1 for s, k, _ in parsed[:-1] if k == "F")
+
+    # last row in current table
+    cur.execute(f'SELECT id, procedure, vol, cur, tim, cap FROM "{current_table}" ORDER BY id DESC LIMIT 1')
+    row = cur.fetchone()
+    if not row:
+        conn.close()
+        return {
+            "current_table": current_table,
+            "current_phase": "CHARGE" if kind == "C" else "DISCHARGE",
+            "completed_tables": completed_tables,
+            "completed_charge_cycles": completed_charge,
+            "completed_discharge_cycles": completed_discharge,
+            "current_vol": None, "current_cur": None,
+            "current_cap": None, "elapsed_in_table_s": 0,
+            "row_count": 0,
+            "file_mtime": os.path.getmtime(filepath),
+        }
+    _, proc, vol, current, tim, cap = row
+    cur.execute(f'SELECT COUNT(*) FROM "{current_table}"')
+    rc = cur.fetchone()[0]
+    conn.close()
+    return {
+        "current_table": current_table,
+        "current_phase": "CHARGE" if kind == "C" else "DISCHARGE",
+        "current_seq":   seq,
+        "current_procedure": proc,           # 1=active, 2/4/etc = rest
+        "completed_tables": completed_tables,
+        "completed_charge_cycles": completed_charge,
+        "completed_discharge_cycles": completed_discharge,
+        "current_vol": vol, "current_cur": current,
+        "current_cap": cap, "elapsed_in_table_s": tim,
+        "row_count": rc,
+        "file_mtime": os.path.getmtime(filepath),
+    }
+
+
 def find_target_discharge(cycles):
     """Pick the last complete discharge for export.
     Mirrors export_to_xlsx.py logic.

@@ -63,8 +63,11 @@ function showNewSessionToast(sessionKey) {
   setTimeout(() => el.classList.add("hidden"), 8000);
 }
 
-// ---------- AUTO-POLL ----------
+// ---------- AUTO-POLL (adaptive: 10s when live, 30s when idle) ----------
 let _lastSessionKey = null;
+let _pollTimer = null;
+let _liveMode  = false;
+
 async function pollForUpdates() {
   try {
     const d = await apiGet("/api/dashboard");
@@ -75,19 +78,97 @@ async function pollForUpdates() {
     } else if (ls.session_key !== _lastSessionKey) {
       _lastSessionKey = ls.session_key;
       showNewSessionToast(ls.session_key);
-      // refresh whichever tab is active
       const active = $(".tab.active").dataset.tab;
       switchTab(active);
     }
-    // Also refresh unlabelled banner state
     if (ls && !d.latest_label) {
       showUnlabelledBanner({...ls, label: null});
     } else {
       $("#unlabelled-banner").classList.add("hidden");
     }
+    // refresh live panel any time it's visible
+    if ($("#tab-dashboard").classList.contains("active")) {
+      await loadLive();
+    }
   } catch (e) { /* ignore */ }
 }
-setInterval(pollForUpdates, 30000);  // every 30s
+
+function startPolling() {
+  if (_pollTimer) clearInterval(_pollTimer);
+  const interval = _liveMode ? 10000 : 30000;
+  _pollTimer = setInterval(pollForUpdates, interval);
+}
+startPolling();
+
+// ---------- LIVE PANEL ----------
+async function loadLive() {
+  try {
+    const live = await apiGet("/api/live");
+    const wasLive = _liveMode;
+    _liveMode = live.is_live;
+    if (wasLive !== _liveMode) startPolling();   // adapt cadence
+
+    const el = $("#live-panel");
+    if (!live.session_key) { el.classList.add("hidden"); return; }
+    el.classList.remove("hidden");
+
+    const cls   = live.is_live ? "" : "idle";
+    const dotTxt = live.is_live ? "LIVE — session in progress" : "Latest session (idle)";
+    const battTag = live.battery_label
+      ? `<span class="cell-tag">Battery ${live.battery_label}</span>`
+      : `<span class="cell-tag unlab">unlabelled</span>`;
+
+    const channels = (live.channels || []).map(c => {
+      const stale = c.age_s > 600;     // no update for 10+ min
+      const resting = c.is_resting;
+      let phaseClass = "charging";
+      if (c.current_phase === "DISCHARGE") phaseClass = "discharging";
+      if (resting) phaseClass = "resting";
+      if (stale)   phaseClass = "stale";
+      const phaseLabel = resting
+        ? "RESTING"
+        : (c.current_phase === "CHARGE" ? "⚡ CHARGING" : "🔻 DISCHARGING");
+      const elapsedMin = Math.floor((c.elapsed_in_table_s || 0) / 60);
+      const elapsedSec = (c.elapsed_in_table_s || 0) % 60;
+      const ageStr = c.age_s < 60 ? `${c.age_s}s ago` : `${Math.floor(c.age_s/60)}m ago`;
+      // typical max cap per Prius cycle ~3-5 Ah; show progress vs 4 Ah baseline
+      const progressPct = Math.min(100, ((c.current_cap || 0) / 4.0) * 100);
+      return `
+        <div class="live-ch ${phaseClass}">
+          <div class="ch-head">
+            <span class="ch-num">CH${c.channel}</span>
+            <span class="ch-phase">${phaseLabel}</span>
+          </div>
+          <div class="live-grid">
+            <span class="lbl">Cycle</span><span class="val">${c.current_cycle}</span>
+            <span class="lbl">Voltage</span><span class="val">${fmt(c.current_vol, 3)} V</span>
+            <span class="lbl">Current</span><span class="val">${fmt(c.current_cur, 2)} A</span>
+            <span class="lbl">Cap so far</span><span class="val">${fmt(c.current_cap, 3)} Ah</span>
+            <span class="lbl">Elapsed</span><span class="val">${elapsedMin}m ${elapsedSec}s</span>
+            <span class="lbl">Last sample</span><span class="val">${ageStr}</span>
+          </div>
+          <div class="progress" title="cap accumulated this cycle"><div style="width: ${progressPct}%"></div></div>
+        </div>`;
+    }).join("");
+
+    el.innerHTML = `
+      <div class="live-card ${cls}">
+        <div class="live-header">
+          <span class="live-dot"></span>
+          <div>
+            <div class="live-title">${dotTxt}</div>
+            <div class="live-meta">Session ${live.session_key} · started ${live.session_started} · ${battTag}</div>
+          </div>
+        </div>
+        ${live.channels.length === 0
+          ? `<p style="color: var(--muted)">No channel data yet.</p>`
+          : `<div class="live-channels">${channels}</div>`}
+        ${live.is_live
+          ? `<p class="live-meta" style="margin-top: 10px;">Refreshing every 10s. Cap-so-far progress bar shown vs 4 Ah baseline.</p>`
+          : `<p class="live-meta" style="margin-top: 10px;">No new data in the last 5 min — session likely complete or YRCARKIT idle.</p>`}
+      </div>`;
+  } catch (e) { /* ignore */ }
+}
 
 // ---------- DASHBOARD ----------
 async function loadDashboard() {
@@ -116,6 +197,9 @@ async function loadDashboard() {
           </div>
         </div>`;
     }
+
+    // also load the live panel above the cards
+    loadLive();
 
     el.innerHTML = `
       ${latestHtml}

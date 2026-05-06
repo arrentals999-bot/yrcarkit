@@ -5,7 +5,7 @@ REM Double-click this file to start the web UI in your browser.
 cd /d "%~dp0\.."
 echo.
 echo ============================================================
-echo   YRCARKIT Battery Manager
+echo   Ratan's Private Battery Manager
 echo   Starting at http://127.0.0.1:5000/
 echo   Browser will open automatically. Close this window to stop.
 echo ============================================================
