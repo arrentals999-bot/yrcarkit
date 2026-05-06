@@ -163,7 +163,17 @@ check("POST compare 200", s == 200)
 check("compare has all 3 strategies",
       all(k in comp for k in ("pair_opposites","match_similar","capacity_only")))
 
-s, save = call("POST", "/api/packs/save", p)
+s, p_named = call("POST", "/api/packs/preview",
+            {"target_battery": "ANY", "strategy": "pair_opposites",
+             "target_blocks": 7, "cap_floor_reuse": 2.5,
+             "ir_ceiling_module": 30,
+             "pack_name": "Verify-Test-Pack",
+             "destination": "Verify dest"})
+check("preview accepts pack_name + destination", p_named.get("pack_name") == "Verify-Test-Pack")
+check("preview computes source_summary", isinstance(p_named.get("source_summary"), str) and p_named["source_summary"])
+check("preview includes source_counts dict", isinstance(p_named.get("source_counts"), dict))
+
+s, save = call("POST", "/api/packs/save", p_named)
 check("POST save returns ok", save.get("ok") is True)
 pack_id = save.get("pack_id")
 check("save returns pack_id", pack_id is not None)
@@ -186,6 +196,26 @@ if saved:
     check("pack has predicted_life", "predicted_life" in saved)
     check("pack has stats", all(k in saved for k in
           ("avg_cap","cap_spread","weakest_cap","avg_ir","ir_spread")))
+    check("pack has pack_name persisted", saved.get("pack_name") == "Verify-Test-Pack",
+          f"got {saved.get('pack_name')}")
+    check("pack has source_summary persisted", bool(saved.get("source_summary")),
+          f"got {saved.get('source_summary')}")
+    check("pack has destination persisted", saved.get("destination") == "Verify dest")
+
+# rename via /edit endpoint
+s, r = call("POST", f"/api/packs/{pack_id}/edit",
+            {"pack_name": "Renamed-Pack", "destination": "New dest", "notes": "n1"})
+check("POST pack edit returns ok", r.get("ok") is True)
+s, packs2 = call("GET", "/api/packs")
+saved2 = next((x for x in packs2 if x["pack_id"] == pack_id), None)
+check("rename took effect", saved2 and saved2.get("pack_name") == "Renamed-Pack",
+      f"got {saved2.get('pack_name') if saved2 else None}")
+check("destination edit took effect", saved2 and saved2.get("destination") == "New dest")
+check("notes edit took effect", saved2 and saved2.get("notes") == "n1")
+
+# edit non-existent pack -> 404
+s, r = call("POST", "/api/packs/NOSUCH/edit", {"pack_name": "x"})
+check("edit on bogus pack returns 404", s == 404)
 
 s, r = call("DELETE", f"/api/packs/{pack_id}")
 check("DELETE pack returns ok", r.get("ok") is True)
@@ -226,8 +256,12 @@ with urllib.request.urlopen(f"{BASE}/static/app.js") as r:
     js = r.read().decode()
 for sym in ("openModuleDetail", "editPoolLabel", "bulkSetStatus",
             "renderStrategyCompare", "showCutoffReminder", "showUnlabelledBanner",
-            "pollForUpdates", "cell-tag"):
+            "pollForUpdates", "cell-tag",
+            "renamePack", "viewPackBlocks", "pack_name", "source_summary"):
     check(f"app.js contains {sym!r}", sym in js)
+
+# HTML form has pack_name field
+check("Build form has pack_name input", 'name="pack_name"' in html)
 
 print()
 print("=" * 70)

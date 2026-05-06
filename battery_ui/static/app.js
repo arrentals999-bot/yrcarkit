@@ -537,6 +537,7 @@ function readBuildForm() {
     ir_ceiling_module: parseFloat(f.ir_ceiling_module.value),
     max_pack_cap_spread: parseFloat(f.max_pack_cap_spread.value),
     max_pack_ir_spread:  parseFloat(f.max_pack_ir_spread.value),
+    pack_name:         f.pack_name.value.trim(),
     destination:       f.destination.value,
   };
 }
@@ -621,6 +622,10 @@ function renderPackResult(pack) {
 
   $("#build-result").innerHTML = `
     <div class="pack-summary">
+      <div style="font-size: 16px; margin-bottom: 8px;">
+        <strong>${escapeHtml(pack.pack_name || pack.pack_id)}</strong>
+        ${pack.source_summary ? `<span style="color: var(--muted); font-weight: normal; margin-left: 12px;"><strong>Sources:</strong> ${escapeHtml(pack.source_summary)}</span>` : ''}
+      </div>
       <div>
         <span class="pack-grade ${pack.grade}">${pack.grade}</span>
         <span class="predicted-life">Predicted life in service: <strong>${pack.predicted_life}</strong></span>
@@ -678,25 +683,30 @@ function renderRejected(rejected) {
 }
 
 // ---------- HISTORY ----------
+let _packsCache = [];
 async function loadHistory() {
   const el = $("#history-list");
   el.innerHTML = '<p class="loading">Loading…</p>';
   try {
     const packs = await apiGet("/api/packs");
+    _packsCache = packs;
     if (!packs.length) {
       el.innerHTML = "<p>No packs built yet. Go to Build Pack tab to create one.</p>";
       return;
     }
     el.innerHTML = packs.map(p => `
-      <div class="pack-summary">
+      <div class="pack-summary" id="pack-row-${p.pack_id}">
         <div>
           <span class="pack-grade ${p.grade}">${p.grade}</span>
-          <strong>${p.pack_id}</strong>
-          <span style="color: var(--muted); margin-left: 12px;">${p.built_at}</span>
+          <strong class="pack-name-display">${escapeHtml(p.pack_name || p.pack_id)}</strong>
+          <button class="tiny-edit" title="rename" onclick="renamePack('${p.pack_id}')">✎</button>
+          <span style="color: var(--muted); font-size: 11px; margin-left: 8px;">id ${p.pack_id} · built ${p.built_at}</span>
           <span style="float: right;">
-            <button class="btn-danger" onclick="deletePack('${p.pack_id}')">Delete & release modules</button>
+            <button class="btn-secondary" onclick="viewPackBlocks('${p.pack_id}')">View blocks</button>
+            <button class="btn-danger" onclick="deletePack('${p.pack_id}')">Delete & release</button>
           </span>
         </div>
+        ${p.source_summary ? `<div style="margin-top: 6px; font-size: 13px;"><strong>Sources:</strong> ${escapeHtml(p.source_summary)}</div>` : ''}
         <div class="pack-stats" style="margin-top: 6px;">
           <div class="stat"><span class="label">Predicted life</span><span class="value">${p.predicted_life}</span></div>
           <div class="stat"><span class="label">Blocks</span><span class="value">${p.block_count}</span></div>
@@ -705,16 +715,76 @@ async function loadHistory() {
           <div class="stat"><span class="label">Weakest</span><span class="value">${fmt(p.weakest_cap)} Ah</span></div>
           <div class="stat"><span class="label">Strategy</span><span class="value">${p.strategy}</span></div>
         </div>
-        ${ p.destination ? `<div style="margin-top: 6px; font-size: 13px;">Destination: <strong>${escapeHtml(p.destination)}</strong></div>` : '' }
+        <div style="margin-top: 8px; display: flex; gap: 10px; align-items: center;">
+          <label style="font-size: 12px; color: var(--muted);">Destination:</label>
+          <input type="text" class="dest-edit" data-pack="${p.pack_id}" value="${escapeHtml(p.destination||'')}" placeholder="customer / vehicle / shelf #" style="flex: 1; padding: 4px 8px; font-size: 12px;">
+          <label style="font-size: 12px; color: var(--muted);">Notes:</label>
+          <input type="text" class="notes-pack-edit" data-pack="${p.pack_id}" value="${escapeHtml(p.notes||'')}" style="flex: 2; padding: 4px 8px; font-size: 12px;">
+        </div>
       </div>
     `).join("");
+
+    $$(".dest-edit").forEach(inp => inp.addEventListener("blur", async () => {
+      await apiPost(`/api/packs/${inp.dataset.pack}/edit`, { destination: inp.value });
+    }));
+    $$(".notes-pack-edit").forEach(inp => inp.addEventListener("blur", async () => {
+      await apiPost(`/api/packs/${inp.dataset.pack}/edit`, { notes: inp.value });
+    }));
   } catch (e) {
     el.innerHTML = `<div class="error-msg">${e}</div>`;
   }
 }
 
+async function renamePack(id) {
+  const cur = _packsCache.find(p => p.pack_id === id);
+  const newName = prompt(`Rename this pack (current: "${cur?.pack_name || id}"):`, cur?.pack_name || "");
+  if (newName === null || newName.trim() === "") return;
+  const r = await apiPost(`/api/packs/${id}/edit`, { pack_name: newName.trim() });
+  if (r.ok) loadHistory(); else alert("rename failed: " + JSON.stringify(r));
+}
+
+function viewPackBlocks(id) {
+  const p = _packsCache.find(x => x.pack_id === id);
+  if (!p) return;
+  $("#module-modal-title").innerHTML = `Pack: <strong>${escapeHtml(p.pack_name || p.pack_id)}</strong>
+    <span style="color: var(--muted); font-size: 13px;">(${p.block_count} blocks · grade ${p.grade} · ${p.predicted_life})</span>`;
+  const rows = (p.block_layout || []).map(b => `
+    <tr>
+      <td><strong>${b.block_number}</strong></td>
+      <td>${moduleCell(b.a)}</td>
+      <td>${moduleCell(b.b)}</td>
+      <td>${fmt(b.block_cap)}</td>
+      <td>${fmt(b.block_ir, 1)}</td>
+      <td style="color: ${b.cap_gap > 0.5 ? 'var(--danger)' : 'var(--muted)'}">${fmt(b.cap_gap)}</td>
+    </tr>
+  `).join("");
+  $("#module-modal-body").innerHTML = `
+    <div class="module-section">
+      <p style="margin-top: 0; font-size: 13px;">
+        <strong>Sources:</strong> ${escapeHtml(p.source_summary || '—')}<br>
+        <strong>Built:</strong> ${p.built_at} · <strong>Strategy:</strong> ${p.strategy}<br>
+        ${p.destination ? `<strong>Destination:</strong> ${escapeHtml(p.destination)}<br>` : ''}
+        ${p.notes ? `<strong>Notes:</strong> ${escapeHtml(p.notes)}` : ''}
+      </p>
+    </div>
+    <div class="module-section">
+      <h4>Block layout</h4>
+      <table>
+        <thead><tr>
+          <th>Block</th><th>Module A (high)</th><th>Module B (low)</th>
+          <th>Block cap</th><th>Block IR</th><th>Cap gap</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+  `;
+  $("#module-modal").classList.remove("hidden");
+}
+
 async function deletePack(id) {
-  if (!confirm(`Delete ${id} and release its modules back to the pool?`)) return;
+  const cur = _packsCache.find(p => p.pack_id === id);
+  const name = cur?.pack_name || id;
+  if (!confirm(`Delete "${name}" and release its modules back to the pool?`)) return;
   await apiDel(`/api/packs/${id}`);
   loadHistory();
 }

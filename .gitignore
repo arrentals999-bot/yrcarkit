@@ -18,8 +18,11 @@ sqldrivers/
 __pycache__/
 *.pyc
 
-# Battery UI local store (per-machine state — labels and pack history live here)
-battery_ui/battery_ui.db
+# Battery UI local store gets pushed via auto_push.ps1 — provides hourly backup
+# in case of laptop power-loss or disk failure. Keep journal/wal noise out though.
+battery_ui/battery_ui.db-journal
+battery_ui/battery_ui.db-wal
+battery_ui/battery_ui.db-shm
 
 # OS junk
 Thumbs.db

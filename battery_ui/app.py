@@ -363,6 +363,21 @@ def api_packs_delete(pack_id):
     return jsonify({"ok": True})
 
 
+@app.post("/api/packs/<pack_id>/edit")
+def api_packs_edit(pack_id):
+    """Rename a saved pack and/or update its destination + notes after build."""
+    data = request.get_json(force=True) or {}
+    ok = db.update_pack_metadata(
+        pack_id,
+        pack_name=data.get("pack_name"),
+        destination=data.get("destination"),
+        notes=data.get("notes"),
+    )
+    if not ok:
+        return jsonify({"error": "no such pack or no fields supplied"}), 404
+    return jsonify({"ok": True})
+
+
 # ----------------------- API: thresholds -----------------------
 
 @app.get("/api/thresholds")
