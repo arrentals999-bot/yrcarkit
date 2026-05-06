@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>YRCARKIT Battery Manager</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<header>
+  <h1>YRCARKIT Battery Manager</h1>
+  <nav>
+    <button class="tab active" data-tab="dashboard">Dashboard</button>
+    <button class="tab" data-tab="sessions">Label Sessions</button>
+    <button class="tab" data-tab="pool">Module Pool</button>
+    <button class="tab" data-tab="build">Build Pack</button>
+    <button class="tab" data-tab="history">Pack History</button>
+  </nav>
+</header>
+
+<main>
+
+  <!-- ============== DASHBOARD ============== -->
+  <section id="tab-dashboard" class="tab-pane active">
+    <h2>Dashboard</h2>
+    <div id="dashboard-content" class="cards"><p class="loading">Loading…</p></div>
+  </section>
+
+  <!-- ============== SESSIONS ============== -->
+  <section id="tab-sessions" class="tab-pane">
+    <h2>Sessions — label which battery & cells you tested</h2>
+    <p class="hint">Each YRCARKIT session needs a battery letter and a cell range so the modules can be identified. Unlabelled sessions show in red.</p>
+    <div id="sessions-list"><p class="loading">Loading…</p></div>
+
+    <!-- Label modal -->
+    <div id="label-modal" class="modal hidden">
+      <div class="modal-content">
+        <h3 id="label-modal-title">Label session</h3>
+        <div id="label-channels-preview"></div>
+        <form id="label-form">
+          <label>Battery letter:
+            <input type="text" name="battery" maxlength="2" required>
+          </label>
+          <label>First cell #:
+            <input type="number" name="cell_start" min="1" max="28" required>
+          </label>
+          <label>Last cell #:
+            <input type="number" name="cell_end" min="1" max="28" required>
+          </label>
+          <label>Channels to skip (comma-sep):
+            <input type="text" name="skip_channels" value="3">
+          </label>
+          <label>Notes:
+            <input type="text" name="notes">
+          </label>
+          <div class="modal-buttons">
+            <button type="button" class="btn-cancel" onclick="closeModal('label-modal')">Cancel</button>
+            <button type="submit" class="btn-primary">Save labels</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============== POOL ============== -->
+  <section id="tab-pool" class="tab-pane">
+    <h2>Module Pool — every module ever tested</h2>
+    <div class="filters">
+      <label>Battery: <select id="filter-battery"><option value="">any</option></select></label>
+      <label>Status: <select id="filter-status">
+        <option value="">any</option>
+        <option value="available">available</option>
+        <option value="used">used</option>
+        <option value="weak">weak</option>
+        <option value="dead">dead</option>
+        <option value="retired">retired</option>
+      </select></label>
+      <label>Trend: <select id="filter-trend">
+        <option value="">any</option>
+        <option value="IMPROVING">IMPROVING</option>
+        <option value="STABLE">STABLE</option>
+        <option value="PLATEAU">PLATEAU</option>
+        <option value="DECLINING">DECLINING</option>
+        <option value="DEAD">DEAD</option>
+        <option value="UNKNOWN">UNKNOWN</option>
+      </select></label>
+      <span id="pool-count"></span>
+    </div>
+    <div id="pool-table-wrap"><p class="loading">Loading…</p></div>
+  </section>
+
+  <!-- ============== BUILD PACK ============== -->
+  <section id="tab-build" class="tab-pane">
+    <h2>Build a Pack</h2>
+    <form id="build-form" class="build-form">
+      <label>Source battery:
+        <select name="target_battery">
+          <option value="ANY">any (use whole pool)</option>
+        </select>
+      </label>
+      <label><input type="checkbox" name="allow_borrow" checked> Allow borrowing from other batteries</label>
+      <label>Strategy:
+        <select name="strategy">
+          <option value="pair_opposites" selected>Pair-opposites (recommended)</option>
+          <option value="match_similar">Match-similar</option>
+        </select>
+      </label>
+      <label><input type="checkbox" name="thermal_placement" checked> Thermal placement (weak to outer ends)</label>
+      <label>Target blocks:
+        <input type="number" name="target_blocks" value="14" min="1" max="20">
+      </label>
+
+      <fieldset class="thresholds">
+        <legend>Thresholds</legend>
+        <label>Cap floor (Ah): <input type="number" name="cap_floor_reuse" step="0.1" value="3.0"></label>
+        <label>IR ceiling (mΩ): <input type="number" name="ir_ceiling_module" step="0.5" value="25"></label>
+        <label>Max cap spread (Ah): <input type="number" name="max_pack_cap_spread" step="0.1" value="0.5"></label>
+        <label>Max IR spread (mΩ): <input type="number" name="max_pack_ir_spread" step="0.5" value="5"></label>
+      </fieldset>
+
+      <label>Destination notes: <input type="text" name="destination" placeholder="e.g. customer name or vehicle"></label>
+
+      <div class="actions">
+        <button type="submit" class="btn-primary">Preview pack</button>
+        <button type="button" id="save-pack-btn" class="btn-success" disabled>Save & lock modules</button>
+      </div>
+    </form>
+
+    <div id="build-result"></div>
+  </section>
+
+  <!-- ============== HISTORY ============== -->
+  <section id="tab-history" class="tab-pane">
+    <h2>Pack History</h2>
+    <div id="history-list"><p class="loading">Loading…</p></div>
+  </section>
+
+</main>
+
+<footer>
+  <p>YRCARKIT data: <code id="yrcarkit-path">…</code> · Local DB: <code>battery_ui.db</code> · <button onclick="refreshAll()">Refresh</button></p>
+</footer>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
