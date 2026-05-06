@@ -18,6 +18,9 @@ sqldrivers/
 __pycache__/
 *.pyc
 
+# Battery UI local store (per-machine state — labels and pack history live here)
+battery_ui/battery_ui.db
+
 # OS junk
 Thumbs.db
 Desktop.ini
