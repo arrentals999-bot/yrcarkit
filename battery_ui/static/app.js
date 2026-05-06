@@ -389,8 +389,8 @@ function renderPool() {
     <table>
       <thead><tr>
         <th><input type="checkbox" id="select-all-pool" onclick="bulkToggleAll(this.checked)"></th>
-        <th>Battery</th><th>Cell #</th>
-        <th>Session · CH</th>
+        <th>Battery / Cell</th>
+        <th>Source</th>
         <th>Cap (Ah)</th><th>IR (mΩ)</th><th>Vend (V)</th>
         <th>Trend</th>
         <th>Cycles</th>
@@ -401,11 +401,13 @@ function renderPool() {
         ${rows.map(m => {
           const k = refKey(m);
           const checked = _bulkSelection.has(k) ? "checked" : "";
+          const tag = m.battery
+            ? `<span class="cell-tag">${m.battery}-${m.cell_position ?? '?'}</span> <button class="tiny-edit" title="edit label" onclick="editPoolLabel('${m.session_key}', ${m.channel}, '${m.battery}', ${m.cell_position||0})">✎</button>`
+            : `<span class="cell-tag unlab">unlabelled</span> <button class="tiny-edit" title="set label" onclick="editPoolLabel('${m.session_key}', ${m.channel}, '', 0)">✎</button>`;
           return `
           <tr>
             <td><input type="checkbox" class="pool-checkbox" data-ref="${k}" ${checked} onclick="bulkToggle('${k}', this.checked)"></td>
-            <td><input type="text" class="pool-inline-edit batt-edit" data-sk="${m.session_key}" data-ch="${m.channel}" value="${escapeHtml(m.battery||'')}" maxlength="2" placeholder="—"></td>
-            <td><input type="number" class="pool-inline-edit cell-edit" data-sk="${m.session_key}" data-ch="${m.channel}" value="${m.cell_position||''}" min="1" max="28" placeholder="—"></td>
+            <td>${tag}</td>
             <td><span class="detail-link" onclick="openModuleDetail('${m.session_key}', ${m.channel})">${m.session_key} · CH${m.channel}</span></td>
             <td>${fmt(m.cap_ah)}</td>
             <td>${fmt(m.ir_mohm, 1)}</td>
@@ -423,20 +425,6 @@ function renderPool() {
       </tbody>
     </table>`;
   $("#pool-table-wrap").innerHTML = html;
-
-  // wire inline edits
-  $$(".batt-edit").forEach(inp => inp.addEventListener("blur", async () => {
-    await apiPost("/api/modules/override", {
-      session_key: inp.dataset.sk, channel: inp.dataset.ch, battery: inp.value.trim().toUpperCase(),
-    });
-    loadPool();
-  }));
-  $$(".cell-edit").forEach(inp => inp.addEventListener("blur", async () => {
-    await apiPost("/api/modules/override", {
-      session_key: inp.dataset.sk, channel: inp.dataset.ch, cell_position: inp.value || null,
-    });
-    loadPool();
-  }));
   $$(".status-edit").forEach(sel => sel.addEventListener("change", async () => {
     await apiPost("/api/modules/override", {
       session_key: sel.dataset.sk, channel: sel.dataset.ch, status: sel.value,
@@ -448,6 +436,21 @@ function renderPool() {
       session_key: inp.dataset.sk, channel: inp.dataset.ch, notes: inp.value,
     });
   }));
+}
+
+async function editPoolLabel(sk, ch, currentBatt, currentCell) {
+  const battery = prompt(`Battery letter for this module (current: ${currentBatt || 'none'}):`, currentBatt || '');
+  if (battery === null) return;
+  const cellStr = prompt(`Cell # 1-28 (current: ${currentCell || 'none'}):`, currentCell || '');
+  if (cellStr === null) return;
+  const cell = cellStr ? parseInt(cellStr) : null;
+  if (battery && (!cell || cell < 1 || cell > 28)) { alert('cell must be 1-28'); return; }
+  await apiPost("/api/modules/override", {
+    session_key: sk, channel: ch,
+    battery: battery.trim().toUpperCase() || null,
+    cell_position: cell,
+  });
+  loadPool();
 }
 
 // ---------- BULK SELECT ----------

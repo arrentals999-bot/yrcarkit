@@ -297,8 +297,33 @@ button { cursor: pointer; font: inherit; }
 /* checkbox in pool */
 .pool-checkbox { cursor: pointer; transform: scale(1.2); }
 
-/* pool inline edits */
-.pool-inline-edit { width: 50px; padding: 3px 6px; font-size: 12px; border: 1px solid var(--border); border-radius: 3px; }
+/* battery/cell tag in pool */
+.cell-tag {
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: 4px;
+  background: var(--primary);
+  color: white;
+  font-weight: 600;
+  font-size: 13px;
+  letter-spacing: 0.3px;
+}
+.cell-tag.unlab {
+  background: #fee2e2;
+  color: #991b1b;
+  font-weight: 500;
+}
+.tiny-edit {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--muted);
+  padding: 2px 6px;
+  border-radius: 3px;
+  margin-left: 2px;
+}
+.tiny-edit:hover { background: #eef2ff; color: var(--primary); }
 
 /* module detail modal */
 .modal-content.modal-wide { max-width: 920px; }
