@@ -45,6 +45,7 @@ CREATE TABLE IF NOT EXISTS module_overrides (
 
 CREATE TABLE IF NOT EXISTS packs (
     pack_id      TEXT PRIMARY KEY,
+    pack_name    TEXT,                     -- human-readable name (defaults to pack_id)
     built_at     TEXT NOT NULL,
     block_count  INTEGER NOT NULL,
     strategy     TEXT NOT NULL,
@@ -57,7 +58,8 @@ CREATE TABLE IF NOT EXISTS packs (
     predicted_life TEXT,
     destination  TEXT DEFAULT '',
     notes        TEXT DEFAULT '',
-    block_layout TEXT NOT NULL  -- JSON: [{block:1, a:{...}, b:{...}}, ...]
+    source_summary TEXT DEFAULT '',        -- e.g. "H (8) + A (4) + B (2)"
+    block_layout TEXT NOT NULL             -- JSON
 );
 
 CREATE TABLE IF NOT EXISTS pack_modules (
@@ -75,6 +77,13 @@ def get_local_conn():
     conn = sqlite3.connect(LOCAL_DB)
     conn.row_factory = sqlite3.Row
     conn.executescript(SCHEMA)
+    # idempotent migrations for older DBs that pre-date the new columns
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(packs)").fetchall()}
+    if "pack_name" not in cols:
+        conn.execute("ALTER TABLE packs ADD COLUMN pack_name TEXT")
+    if "source_summary" not in cols:
+        conn.execute("ALTER TABLE packs ADD COLUMN source_summary TEXT DEFAULT ''")
+    conn.commit()
     return conn
 
 
@@ -292,15 +301,18 @@ def release_pack_modules(pack_id):
 def save_pack(pack):
     conn = get_local_conn()
     conn.execute("""
-        INSERT INTO packs (pack_id, built_at, block_count, strategy, grade,
+        INSERT INTO packs (pack_id, pack_name, built_at, block_count, strategy, grade,
                            avg_cap, cap_spread, weakest_cap, avg_ir, ir_spread,
-                           predicted_life, destination, notes, block_layout)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                           predicted_life, destination, notes, source_summary, block_layout)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
-        pack["pack_id"], pack["built_at"], pack["block_count"], pack["strategy"],
+        pack["pack_id"],
+        pack.get("pack_name") or pack["pack_id"],
+        pack["built_at"], pack["block_count"], pack["strategy"],
         pack["grade"], pack["avg_cap"], pack["cap_spread"], pack["weakest_cap"],
         pack["avg_ir"], pack["ir_spread"], pack["predicted_life"],
         pack.get("destination", ""), pack.get("notes", ""),
+        pack.get("source_summary", ""),
         json.dumps(pack["block_layout"]),
     ))
     for block in pack["block_layout"]:
@@ -325,9 +337,33 @@ def list_packs():
     for r in rows:
         d = dict(r)
         d["block_layout"] = json.loads(d["block_layout"])
+        # backfill name for older rows
+        if not d.get("pack_name"):
+            d["pack_name"] = d["pack_id"]
         out.append(d)
     conn.close()
     return out
+
+
+def update_pack_metadata(pack_id, pack_name=None, destination=None, notes=None):
+    """Edit-after-save: rename, set destination, set notes. Returns True if updated."""
+    conn = get_local_conn()
+    fields, values = [], []
+    if pack_name is not None:
+        fields.append("pack_name=?"); values.append(pack_name)
+    if destination is not None:
+        fields.append("destination=?"); values.append(destination)
+    if notes is not None:
+        fields.append("notes=?"); values.append(notes)
+    if not fields:
+        conn.close()
+        return False
+    values.append(pack_id)
+    cur = conn.execute(f"UPDATE packs SET {', '.join(fields)} WHERE pack_id=?", values)
+    conn.commit()
+    ok = cur.rowcount > 0
+    conn.close()
+    return ok
 
 
 # ---------- Combined: full module pool view ----------

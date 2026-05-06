@@ -293,7 +293,7 @@ def grade_pack(blocks):
 
 def build_pack(modules, target_blocks=14, strategy="pair_opposites",
                thermal_placement=True, thresholds=None,
-               destination="", notes=""):
+               destination="", notes="", pack_name=""):
     """Top-level pack builder. Returns a fully-formed pack dict ready to save."""
     th = thresholds or DEFAULT_THRESHOLDS
 
@@ -329,15 +329,29 @@ def build_pack(modules, target_blocks=14, strategy="pair_opposites",
     # full pool rejection report
     _, rejected = _eligible_with_rejects(modules, th)
 
+    # Source-battery breakdown — count modules per battery letter in the final pack
+    src_counts = {}
+    for b in layout:
+        for pos in ("a", "b"):
+            m = b.get(pos)
+            if m:
+                key = m.get("battery") or "(unlabelled)"
+                src_counts[key] = src_counts.get(key, 0) + 1
+    # Sort by count descending so the dominant source comes first
+    src_summary = " + ".join(f"{k} ({v})" for k, v in sorted(src_counts.items(), key=lambda x: -x[1]))
+
     pack_id = f"PACK-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
     return {
         "pack_id": pack_id,
+        "pack_name": pack_name or pack_id,
         "built_at": datetime.now().isoformat(timespec="seconds"),
         "block_count": target_blocks,
         "strategy": strategy + (" + thermal" if thermal_placement else ""),
         "block_layout": layout,
         "destination": destination,
         "notes": notes,
+        "source_summary": src_summary,
+        "source_counts": src_counts,
         "swap_suggestions": swap_suggestions,
         "rejected_modules": [_strip_module(r) | {"reject_reasons": r["reject_reasons"]} for r in rejected],
         **grade_info,

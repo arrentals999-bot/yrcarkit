@@ -286,6 +286,7 @@ def api_pack_preview():
         thresholds=thresholds,
         destination=data.get("destination", ""),
         notes=data.get("notes", ""),
+        pack_name=data.get("pack_name", ""),
     )
 
     summary = pairing.build_pack_summary(candidates)
