@@ -43,6 +43,17 @@
     <p class="hint">Each YRCARKIT session needs a battery letter and a cell range so the modules can be identified. Unlabelled sessions show in red.</p>
     <div id="sessions-list"><p class="loading">Loading…</p></div>
 
+    <!-- Module detail modal (used from Pool & Sessions tabs) -->
+    <div id="module-modal" class="modal hidden">
+      <div class="modal-content modal-wide">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <h3 id="module-modal-title">Module detail</h3>
+          <button class="banner-dismiss" onclick="closeModal('module-modal')" style="font-size: 24px;">×</button>
+        </div>
+        <div id="module-modal-body"></div>
+      </div>
+    </div>
+
     <!-- Label modal -->
     <div id="label-modal" class="modal hidden">
       <div class="modal-content">

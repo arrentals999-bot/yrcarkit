@@ -221,6 +221,134 @@ async function openLabelModal(sessionKey) {
 
 function closeModal(id) { $("#" + id).classList.add("hidden"); }
 
+// ---------- MODULE DETAIL MODAL ----------
+async function openModuleDetail(sessionKey, channel) {
+  $("#module-modal-title").textContent = `Loading…`;
+  $("#module-modal-body").innerHTML = '<p class="loading">Reading cycle data…</p>';
+  $("#module-modal").classList.remove("hidden");
+
+  try {
+    const d = await apiGet(`/api/modules/${sessionKey}/${channel}`);
+    const tag = d.battery ? `Battery ${d.battery} · Cell ${d.cell_position}` : `Unlabelled module`;
+    $("#module-modal-title").innerHTML = `${tag}  <span style="color: var(--muted); font-size: 14px;">(session ${d.session_key} · CH${d.channel})</span>`;
+
+    // peak / settled metrics
+    const dis = d.cycles.filter(c => c.kind === "F");
+    const chg = d.cycles.filter(c => c.kind === "C");
+    const peakDis = dis.length ? Math.max(...dis.map(c => c.cap_ah)) : null;
+    const targetTable = d.target?.table;
+
+    // mini sparkline for discharge caps
+    const dcaps = dis.map(c => c.cap_ah);
+    const dmax = Math.max(...dcaps, 1);
+    const spark = `<span class="cap-spark">${dcaps.map(c => `<div class="bar" title="${c.toFixed(2)} Ah" style="height:${Math.max(2, c/dmax*22).toFixed(0)}px"></div>`).join('')}</span>`;
+
+    // cycle table
+    const cycleRows = d.cycles.map(c => {
+      const cls = c.kind === "C" ? "charge" : "discharge";
+      const tgt = c.table === targetTable ? "target" : "";
+      return `<tr class="cycle-row ${cls} ${tgt}">
+        <td>${c.table}</td>
+        <td>${c.kind === "C" ? "CHARGE" : "discharge"}</td>
+        <td>${c.cap_ah.toFixed(3)}</td>
+        <td>${c.ir_mohm == null ? "—" : c.ir_mohm.toFixed(1)}</td>
+        <td>${c.v_end == null ? "—" : c.v_end.toFixed(3)}</td>
+        <td>${(c.dur_s / 60).toFixed(1)} min</td>
+        <td>${c.rows}</td>
+        ${c.table === targetTable ? '<td><span class="badge IMPROVING" style="font-size:10px">target for export</span></td>' : '<td></td>'}
+      </tr>`;
+    }).join("");
+
+    // history of same cell across other sessions
+    let historyHtml = "";
+    if (d.history && d.history.length) {
+      historyHtml = `
+        <div class="module-section">
+          <h4>Same cell tested in ${d.history.length} other session(s)</h4>
+          ${d.history.map(h => `
+            <div class="history-row">
+              <strong>${h.session_key}</strong>
+              <span style="color: var(--muted)">${h.started}</span>
+              <span>cap <strong>${fmt(h.cap_ah)} Ah</strong></span>
+              <span>IR <strong>${fmt(h.ir_mohm,1)} mΩ</strong></span>
+              <span>Vend ${fmt(h.v_end,3)} V</span>
+              <span>${h.n_discharges}D</span>
+              <span class="badge ${h.trend}" style="font-size: 10px;">${h.trend}</span>
+              <button class="btn-cancel" style="padding: 3px 8px; font-size: 11px; margin-left: auto;" onclick="openModuleDetail('${h.session_key}', ${h.channel})">view</button>
+            </div>
+          `).join("")}
+        </div>`;
+    } else if (d.battery && d.cell_position) {
+      historyHtml = `<div class="module-section"><h4>History</h4><p style="color: var(--muted)">No prior tests of this cell in other sessions.</p></div>`;
+    } else {
+      historyHtml = `<div class="module-section"><h4>History</h4><p style="color: var(--muted)">Module is unlabelled — label this session to track this cell across other tests.</p></div>`;
+    }
+
+    // total accumulated cycle time
+    const totalSec = d.cycles.reduce((sum, c) => sum + (c.dur_s || 0), 0);
+    const totalH = Math.floor(totalSec / 3600);
+    const totalM = Math.round((totalSec % 3600) / 60);
+
+    $("#module-modal-body").innerHTML = `
+      <div class="module-section">
+        <div class="module-meta-grid">
+          <div class="meta-item"><div class="lbl">Settled cap (target)</div><div class="val">${fmt(d.target?.cap_ah)} Ah</div></div>
+          <div class="meta-item"><div class="lbl">Settled IR</div><div class="val">${fmt(d.target?.ir_mohm, 1)} mΩ</div></div>
+          <div class="meta-item"><div class="lbl">End voltage</div><div class="val">${fmt(d.target?.v_end, 3)} V</div></div>
+          <div class="meta-item"><div class="lbl">Peak discharge cap</div><div class="val">${fmt(peakDis)} Ah</div></div>
+          <div class="meta-item"><div class="lbl">Cycles run</div><div class="val">${chg.length}C / ${dis.length}D</div></div>
+          <div class="meta-item"><div class="lbl">Total cycle time</div><div class="val">${totalH}h ${totalM}m</div></div>
+        </div>
+        <p style="margin-top: 10px; font-size: 13px;">
+          <span class="badge ${d.trend}">${d.trend}</span>
+          <span style="color: var(--muted); margin-left: 8px;">${d.trend_desc}</span>
+        </p>
+        <p style="margin-top: 8px; font-size: 13px;">
+          Discharge cap progression: ${spark}
+          <span style="color: var(--muted); font-family: ui-monospace, monospace; font-size: 11px; margin-left: 8px;">
+            ${dcaps.map(c => c.toFixed(2)).join(' → ')}
+          </span>
+        </p>
+      </div>
+
+      <div class="module-section">
+        <h4>Every cycle in this session (${d.cycles.length} tables)</h4>
+        <table class="cycle-table">
+          <thead><tr>
+            <th>Table</th><th>Kind</th><th>Cap (Ah)</th><th>IR (mΩ)</th><th>V end (V)</th><th>Duration</th><th>Rows</th><th></th>
+          </tr></thead>
+          <tbody>${cycleRows}</tbody>
+        </table>
+      </div>
+
+      ${historyHtml}
+
+      <div class="module-section">
+        <h4>Status & notes</h4>
+        <div style="display: flex; gap: 10px; align-items: center;">
+          <select id="module-status-edit" style="padding: 6px 10px;">
+            ${["available","used","weak","dead","retired"].map(s => `<option value="${s}" ${s===d.status?'selected':''}>${s}</option>`).join("")}
+          </select>
+          <input type="text" id="module-notes-edit" value="${escapeHtml(d.notes||'')}" placeholder="notes" style="flex: 1; padding: 6px 10px;">
+          <button class="btn-primary" onclick="saveModuleEdits('${d.session_key}', ${d.channel})">Save</button>
+        </div>
+      </div>
+    `;
+  } catch (e) {
+    $("#module-modal-body").innerHTML = `<div class="error-msg">${e}</div>`;
+  }
+}
+
+async function saveModuleEdits(sk, ch) {
+  await apiPost("/api/modules/override", {
+    session_key: sk, channel: ch,
+    status: $("#module-status-edit").value,
+    notes:  $("#module-notes-edit").value,
+  });
+  closeModal("module-modal");
+  loadPool();
+}
+
 // ---------- POOL with bulk select + inline edit ----------
 let _pool = [];
 let _bulkSelection = new Set();
@@ -278,12 +406,12 @@ function renderPool() {
             <td><input type="checkbox" class="pool-checkbox" data-ref="${k}" ${checked} onclick="bulkToggle('${k}', this.checked)"></td>
             <td><input type="text" class="pool-inline-edit batt-edit" data-sk="${m.session_key}" data-ch="${m.channel}" value="${escapeHtml(m.battery||'')}" maxlength="2" placeholder="—"></td>
             <td><input type="number" class="pool-inline-edit cell-edit" data-sk="${m.session_key}" data-ch="${m.channel}" value="${m.cell_position||''}" min="1" max="28" placeholder="—"></td>
-            <td><span style="font-family: monospace; font-size: 11px;">${m.session_key}</span> · CH${m.channel}</td>
+            <td><span class="detail-link" onclick="openModuleDetail('${m.session_key}', ${m.channel})">${m.session_key} · CH${m.channel}</span></td>
             <td>${fmt(m.cap_ah)}</td>
             <td>${fmt(m.ir_mohm, 1)}</td>
             <td>${fmt(m.v_end, 3)}</td>
             <td><span class="badge ${m.trend}">${m.trend}</span></td>
-            <td><span class="cap-series" title="discharge caps each cycle">${(m.discharge_caps || []).map(c=>c.toFixed(2)).join('→')}</span></td>
+            <td><span class="cap-series" title="discharge caps each cycle — click for full detail" style="cursor:pointer" onclick="openModuleDetail('${m.session_key}', ${m.channel})">${(m.discharge_caps || []).map(c=>c.toFixed(2)).join('→')}</span></td>
             <td>
               <select class="status-edit" data-sk="${m.session_key}" data-ch="${m.channel}">
                 ${["available","used","weak","dead","retired"].map(s => `<option value="${s}" ${s===m.status?'selected':''}>${s}</option>`).join("")}

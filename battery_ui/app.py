@@ -133,6 +133,86 @@ def api_pool():
     return jsonify(pool)
 
 
+@app.get("/api/modules/<session_key>/<int:channel>")
+def api_module_detail(session_key, channel):
+    """Full per-cell detail: every cycle (charge + discharge) with cap, IR,
+    Vend, duration, plus historical tests of the same cell in other sessions
+    (if it's labelled)."""
+    sessions = {s["session_key"]: s for s in db.scan_sessions()}
+    if session_key not in sessions:
+        abort(404)
+    s = sessions[session_key]
+    if channel not in s["channels"]:
+        abort(404)
+
+    fp = s["channel_paths"][channel]
+    cycles = db.read_cycles_for_channel(fp)
+    target = db.find_target_discharge(cycles)
+    dis_caps = [c["cap_ah"] for c in cycles if c["kind"] == "F"]
+    trend = pairing.classify_trend(dis_caps)
+
+    # determine battery + cell for this module (from override or label)
+    override = db.get_module_override(session_key, channel) or {}
+    label = db.get_session_label(session_key)
+    battery = override.get("battery") or (label["battery"] if label else None)
+    cell_pos = override.get("cell_position")
+    if not cell_pos and label:
+        skip = set(json.loads(label["skip_channels"]) if label.get("skip_channels") else [3])
+        active = [c for c in s["channels"] if c not in skip]
+        if channel in active:
+            idx = active.index(channel)
+            cell_pos = label["cell_start"] + idx
+
+    # walk other sessions for the same battery+cell
+    history = []
+    if battery and cell_pos:
+        for other in db.scan_sessions():
+            if other["session_key"] == session_key:
+                continue
+            other_label = db.get_session_label(other["session_key"])
+            if not other_label or other_label["battery"] != battery:
+                continue
+            if not (other_label["cell_start"] <= cell_pos <= other_label["cell_end"]):
+                continue
+            other_skip = set(json.loads(other_label.get("skip_channels", "[3]")))
+            other_active = [c for c in other["channels"] if c not in other_skip]
+            cell_offset = cell_pos - other_label["cell_start"]
+            if cell_offset < len(other_active):
+                other_ch = other_active[cell_offset]
+                other_fp = other["channel_paths"].get(other_ch)
+                if other_fp:
+                    o_cycles = db.read_cycles_for_channel(other_fp)
+                    o_target = db.find_target_discharge(o_cycles)
+                    o_dis_caps = [c["cap_ah"] for c in o_cycles if c["kind"] == "F"]
+                    history.append({
+                        "session_key": other["session_key"],
+                        "started":     other["started"],
+                        "channel":     other_ch,
+                        "cap_ah":      o_target["cap_ah"] if o_target else None,
+                        "ir_mohm":     o_target["ir_mohm"] if o_target else None,
+                        "v_end":       o_target["v_end"] if o_target else None,
+                        "n_discharges": len(o_dis_caps),
+                        "trend":       pairing.classify_trend(o_dis_caps),
+                        "discharge_caps": o_dis_caps,
+                    })
+        history.sort(key=lambda h: h["started"], reverse=True)
+
+    return jsonify({
+        "session_key":    session_key,
+        "session_started": s["started"],
+        "channel":        channel,
+        "battery":        battery,
+        "cell_position":  cell_pos,
+        "status":         override.get("status", "available"),
+        "notes":          override.get("notes", ""),
+        "trend":          trend,
+        "trend_desc":     pairing.TREND_DESCRIPTION.get(trend, ""),
+        "target":         target,
+        "cycles":         cycles,
+        "history":        history,
+    })
+
+
 @app.post("/api/modules/override")
 def api_module_override():
     data = request.get_json(force=True)
