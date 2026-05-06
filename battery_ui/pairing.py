@@ -64,20 +64,36 @@ TREND_DESCRIPTION = {
 
 def _eligible(modules, thresholds):
     """Filter modules to those eligible for pack-building."""
+    eligible, _ = _eligible_with_rejects(modules, thresholds)
+    return eligible
+
+
+def _eligible_with_rejects(modules, thresholds):
+    """Same as _eligible but also returns rejected modules with reasons."""
     floor = thresholds["cap_floor_reuse"]
     ceil  = thresholds["ir_ceiling_module"]
-    out = []
+    eligible, rejected = [], []
     for m in modules:
+        reasons = []
         if m.get("status") != "available":
-            continue
-        if m.get("cap_ah") is None or m["cap_ah"] < floor:
-            continue
-        if m.get("ir_mohm") is None or m["ir_mohm"] > ceil:
-            continue
-        if m.get("trend") in ("DEAD", "UNKNOWN"):
-            continue
-        out.append(m)
-    return out
+            reasons.append(f"status={m.get('status')}")
+        if m.get("cap_ah") is None:
+            reasons.append("no cap data")
+        elif m["cap_ah"] < floor:
+            reasons.append(f"cap {m['cap_ah']:.2f} < {floor} Ah floor")
+        if m.get("ir_mohm") is None:
+            reasons.append("no IR data")
+        elif m["ir_mohm"] > ceil:
+            reasons.append(f"IR {m['ir_mohm']:.1f} > {ceil} mΩ ceiling")
+        if m.get("trend") == "DEAD":
+            reasons.append("trend=DEAD")
+        if m.get("trend") == "UNKNOWN":
+            reasons.append("trend=UNKNOWN (incomplete cycles)")
+        if reasons:
+            rejected.append({**m, "reject_reasons": reasons})
+        else:
+            eligible.append(m)
+    return eligible, rejected
 
 
 def pair_opposites(modules, target_blocks=14, thresholds=None):
@@ -121,6 +137,31 @@ def match_similar(modules, target_blocks=14, thresholds=None):
     pool.sort(key=lambda m: -m["cap_ah"])
     picked = pool[:needed]
 
+    blocks = []
+    for n in range(target_blocks):
+        a, b = picked[n * 2], picked[n * 2 + 1]
+        blocks.append({
+            "block_number": n + 1, "a": a, "b": b,
+            "block_cap": round((a["cap_ah"] + b["cap_ah"]) / 2, 3),
+            "block_ir":  round(((a["ir_mohm"] or 0) + (b["ir_mohm"] or 0)) / 2, 1),
+            "cap_gap":   round(abs(a["cap_ah"] - b["cap_ah"]), 3),
+        })
+    return blocks, None
+
+
+def capacity_only(modules, target_blocks=14, thresholds=None):
+    """Simplest possible: take the top-N by capacity, pair them in adjacent order
+    (1 with 2, 3 with 4, ...). No optimization, just rank-and-take."""
+    th = thresholds or DEFAULT_THRESHOLDS
+    pool = _eligible(modules, th)
+    needed = target_blocks * 2
+    if len(pool) < needed:
+        return None, f"Need {needed} eligible modules, have {len(pool)}"
+    pool.sort(key=lambda m: -m["cap_ah"])
+    picked = pool[:needed]
+    # arbitrary pairing: index 0 with -1, 1 with -2, ... (this is identical to
+    # pair_opposites within the picked set, but we keep it simple here:
+    # adjacent pairs in cap-sorted order = strongest pairs first, then weaker)
     blocks = []
     for n in range(target_blocks):
         a, b = picked[n * 2], picked[n * 2 + 1]
@@ -258,15 +299,20 @@ def build_pack(modules, target_blocks=14, strategy="pair_opposites",
 
     if strategy == "match_similar":
         blocks, err = match_similar(modules, target_blocks, th)
+    elif strategy == "capacity_only":
+        blocks, err = capacity_only(modules, target_blocks, th)
     else:
         blocks, err = pair_opposites(modules, target_blocks, th)
     if err:
-        return {"error": err}
+        # also include rejected modules in the error response so the user can see why
+        _, rejected = _eligible_with_rejects(modules, th)
+        return {"error": err, "rejected_modules": [_strip_module(r) | {"reject_reasons": r["reject_reasons"]} for r in rejected]}
 
     if thermal_placement:
         blocks = apply_thermal_placement(blocks)
 
     grade_info = grade_pack(blocks)
+    swap_suggestions = suggest_swaps(blocks, modules, th)
 
     # normalize block_layout to JSON-safe dicts
     layout = []
@@ -280,6 +326,9 @@ def build_pack(modules, target_blocks=14, strategy="pair_opposites",
             "cap_gap":   b["cap_gap"],
         })
 
+    # full pool rejection report
+    _, rejected = _eligible_with_rejects(modules, th)
+
     pack_id = f"PACK-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
     return {
         "pack_id": pack_id,
@@ -289,8 +338,66 @@ def build_pack(modules, target_blocks=14, strategy="pair_opposites",
         "block_layout": layout,
         "destination": destination,
         "notes": notes,
+        "swap_suggestions": swap_suggestions,
+        "rejected_modules": [_strip_module(r) | {"reject_reasons": r["reject_reasons"]} for r in rejected],
         **grade_info,
     }
+
+
+def suggest_swaps(blocks, all_modules, thresholds):
+    """For grade B-or-worse packs, suggest which weak module(s) to replace
+    and where to find a stronger candidate."""
+    if not blocks:
+        return []
+    # find the weakest block (by min cap of its 2 modules)
+    block_min = []
+    for b in blocks:
+        a, bb = b.get("a"), b.get("b")
+        for m in (a, bb):
+            if m and m.get("cap_ah") is not None:
+                block_min.append((m["cap_ah"], m, b["block_number"]))
+    if not block_min:
+        return []
+    block_min.sort(key=lambda x: x[0])
+    weakest_cap, weakest_mod, weakest_block = block_min[0]
+
+    # what would a "Good" tier weakest look like?
+    target_cap = 4.0  # B-tier floor
+
+    if weakest_cap >= target_cap:
+        return []   # already good
+
+    in_pack_ids = set()
+    for b in blocks:
+        for pos in ("a", "b"):
+            m = b.get(pos)
+            if m:
+                in_pack_ids.add((m["session_key"], m["channel"]))
+
+    # find available stronger candidates not currently in this pack
+    eligible, _ = _eligible_with_rejects(all_modules, thresholds)
+    candidates = [m for m in eligible
+                  if (m["session_key"], m["channel"]) not in in_pack_ids
+                  and m.get("cap_ah", 0) >= target_cap]
+    candidates.sort(key=lambda m: -m["cap_ah"])
+
+    suggestions = []
+    weakest_label = (f"{weakest_mod.get('battery')}-{weakest_mod.get('cell_position')}"
+                     if weakest_mod.get("battery") else f"({weakest_mod['session_key']} CH{weakest_mod['channel']})")
+    if candidates:
+        top = candidates[0]
+        top_label = (f"{top.get('battery')}-{top.get('cell_position')}"
+                     if top.get("battery") else f"({top['session_key']} CH{top['channel']})")
+        suggestions.append(
+            f"Block {weakest_block}'s weakest cell is {weakest_label} ({weakest_cap:.2f} Ah). "
+            f"Swapping for {top_label} ({top['cap_ah']:.2f} Ah) would push the pack toward grade B."
+        )
+    else:
+        suggestions.append(
+            f"Block {weakest_block}'s weakest cell is {weakest_label} ({weakest_cap:.2f} Ah). "
+            f"No stronger candidate available — test more modules to fix this."
+        )
+    return suggestions
 
 
 def _strip_module(m):

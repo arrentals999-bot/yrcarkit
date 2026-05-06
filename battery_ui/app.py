@@ -39,12 +39,26 @@ def api_sessions():
     out = []
     for s in sessions:
         label = db.get_session_label(s["session_key"])
+        # collect trend distribution for this session
+        trend_dist = {}
+        worst_cap = best_cap = None
+        for ch in s["channels"]:
+            cycles = db.read_cycles_for_channel(s["channel_paths"][ch])
+            target = db.find_target_discharge(cycles)
+            dis_caps = [c["cap_ah"] for c in cycles if c["kind"] == "F"]
+            t = pairing.classify_trend(dis_caps)
+            trend_dist[t] = trend_dist.get(t, 0) + 1
+            if target and target["cap_ah"] is not None:
+                worst_cap = target["cap_ah"] if worst_cap is None else min(worst_cap, target["cap_ah"])
+                best_cap  = target["cap_ah"] if best_cap  is None else max(best_cap,  target["cap_ah"])
         out.append({
             "session_key":   s["session_key"],
             "started":       s["started"],
             "date":          s["date"],
             "channels":      s["channels"],
             "label":         label,
+            "trend_dist":    trend_dist,
+            "cap_range":     [worst_cap, best_cap] if worst_cap is not None else None,
         })
     return jsonify(out)
 
@@ -134,6 +148,23 @@ def api_module_override():
     return jsonify({"ok": True})
 
 
+@app.post("/api/modules/bulk")
+def api_modules_bulk():
+    """Bulk-update status (and optionally notes) for many modules at once.
+    Body: { "refs": [{session_key, channel}, ...], "status": "retired", "notes": "..." }
+    """
+    data = request.get_json(force=True)
+    refs = data.get("refs") or []
+    status = data.get("status")
+    notes = data.get("notes")
+    for r in refs:
+        db.save_module_override(
+            r["session_key"], int(r["channel"]),
+            status=status, notes=notes,
+        )
+    return jsonify({"ok": True, "updated": len(refs)})
+
+
 # ----------------------- API: pack building -----------------------
 
 @app.post("/api/packs/preview")
@@ -181,6 +212,44 @@ def api_pack_preview():
     pack["candidate_summary"] = summary
     pack["target_battery"] = target_battery
     return jsonify(pack)
+
+
+@app.post("/api/packs/compare")
+def api_pack_compare():
+    """Build the pack with all 3 strategies and return summary stats for each
+    so the user can pick the best one. Doesn't save anything."""
+    data = request.get_json(force=True) or {}
+    pool = db.build_module_pool()
+    target_battery = data.get("target_battery")
+
+    def select_modules():
+        if not target_battery or target_battery == "ANY":
+            return pool
+        primary = [m for m in pool if (m.get("battery") or "").upper() == target_battery.upper()]
+        if data.get("allow_borrow", True):
+            others = [m for m in pool if (m.get("battery") or "").upper() != target_battery.upper()]
+            return primary + others
+        return primary
+
+    candidates = select_modules()
+    target_blocks = int(data.get("target_blocks", 14))
+    thermal = bool(data.get("thermal_placement", True))
+
+    thresholds = pairing.DEFAULT_THRESHOLDS.copy()
+    for k in thresholds:
+        if k in data:
+            try:
+                thresholds[k] = float(data[k])
+            except (TypeError, ValueError):
+                pass
+
+    results = {}
+    for strat in ("pair_opposites", "match_similar", "capacity_only"):
+        p = pairing.build_pack(candidates, target_blocks=target_blocks,
+                               strategy=strat, thermal_placement=thermal,
+                               thresholds=thresholds)
+        results[strat] = p
+    return jsonify(results)
 
 
 @app.post("/api/packs/save")

@@ -213,6 +213,93 @@ button { cursor: pointer; font: inherit; }
 /* errors */
 .error-msg { background: #fee2e2; color: #991b1b; padding: 10px 14px; border-radius: 4px; margin-bottom: 12px; }
 
+/* banners */
+#banners { position: sticky; top: 0; z-index: 50; }
+.banner {
+  padding: 10px 20px; font-size: 13px; display: flex; align-items: center;
+  justify-content: space-between; border-bottom: 1px solid rgba(0,0,0,0.06);
+}
+.banner.hidden { display: none; }
+.banner-info { background: #dbeafe; color: #1e40af; }
+.banner-warn { background: #fef3c7; color: #92400e; }
+.banner-warn a { color: #92400e; font-weight: 600; text-decoration: underline; cursor: pointer; }
+.banner-dismiss {
+  background: transparent; border: none; color: inherit; font-size: 18px;
+  cursor: pointer; padding: 0 8px; opacity: 0.6;
+}
+.banner-dismiss:hover { opacity: 1; }
+
+.toast {
+  position: fixed; bottom: 24px; right: 24px;
+  background: #1f2937; color: white; padding: 12px 18px; border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.2); font-size: 13px; max-width: 320px;
+  z-index: 200;
+  animation: slideIn .3s ease-out;
+}
+.toast.hidden { display: none; }
+.toast a { color: #93c5fd; text-decoration: underline; cursor: pointer; }
+@keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+
+/* bulk bar */
+.bulk-bar {
+  background: #1e40af; color: white; padding: 8px 16px; border-radius: 6px;
+  margin-bottom: 12px; display: flex; gap: 10px; align-items: center;
+}
+.bulk-bar.hidden { display: none; }
+.bulk-bar #bulk-count { font-weight: 600; margin-right: auto; font-size: 13px; }
+.bulk-bar button { padding: 5px 12px; font-size: 12px; }
+
+/* secondary button */
+.btn-secondary {
+  background: #6b7280; color: white; border: none; padding: 8px 16px; border-radius: 4px; font-weight: 500;
+}
+.btn-secondary:hover { background: #4b5563; }
+
+/* compare strategies */
+.strategy-compare {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 16px;
+}
+.strategy-card {
+  background: var(--card); border: 1px solid var(--border); border-radius: 6px;
+  padding: 14px; cursor: pointer; transition: transform .15s, box-shadow .15s;
+}
+.strategy-card:hover { transform: translateY(-2px); box-shadow: 0 4px 8px rgba(0,0,0,0.08); }
+.strategy-card.recommended { border: 2px solid var(--success); }
+.strategy-card .strat-name { font-weight: 600; font-size: 14px; margin-bottom: 4px; }
+.strategy-card .strat-grade { display: inline-block; padding: 4px 12px; border-radius: 4px; color: white; font-weight: 700; font-size: 16px; }
+.strategy-card .strat-stat { font-size: 12px; color: var(--muted); margin-top: 6px; }
+
+/* tooltip */
+.tooltip { position: relative; cursor: help; border-bottom: 1px dotted var(--muted); }
+.tooltip:hover::after {
+  content: attr(data-tip); position: absolute; bottom: 100%; left: 0;
+  background: #1f2937; color: white; padding: 8px 12px; border-radius: 4px;
+  font-size: 12px; white-space: normal; width: 280px; z-index: 100;
+  margin-bottom: 4px; box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+}
+
+/* rejected modules */
+.rejected-list {
+  margin-top: 12px; padding: 10px 14px; background: #fef2f2; border-radius: 4px;
+  font-size: 12px; max-height: 200px; overflow-y: auto;
+}
+.rejected-list h4 { margin: 0 0 6px; font-size: 13px; color: var(--danger); }
+.rejected-list .row { padding: 3px 0; border-bottom: 1px dotted #fecaca; }
+.rejected-list .row:last-child { border-bottom: none; }
+
+/* swap suggestions */
+.swap-suggestions {
+  margin-top: 12px; padding: 10px 14px; background: #ecfdf5; border-left: 4px solid var(--success);
+  border-radius: 4px; font-size: 13px;
+}
+.swap-suggestions h4 { margin: 0 0 6px; font-size: 13px; color: #065f46; }
+
+/* checkbox in pool */
+.pool-checkbox { cursor: pointer; transform: scale(1.2); }
+
+/* pool inline edits */
+.pool-inline-edit { width: 50px; padding: 3px 6px; font-size: 12px; border: 1px solid var(--border); border-radius: 3px; }
+
 /* footer */
 footer { padding: 12px 24px; color: var(--muted); font-size: 12px; border-top: 1px solid var(--border); margin-top: 30px; background: var(--card); }
 footer code { background: #f3f4f6; padding: 2px 6px; border-radius: 3px; font-size: 11px; }

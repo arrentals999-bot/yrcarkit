@@ -26,6 +26,68 @@ async function apiPost(url, body) {
 async function apiDel(url) { const r = await fetch(url, { method: "DELETE" }); return r.json(); }
 
 function fmt(v, dp=2) { return v == null ? "—" : Number(v).toFixed(dp); }
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);
+}
+
+// ---------- BANNERS ----------
+function dismissBanner(elId, storeKey) {
+  $("#" + elId).classList.add("hidden");
+  if (storeKey) localStorage.setItem(storeKey, "1");
+}
+
+function showCutoffReminder() {
+  if (localStorage.getItem("cutoff-dismissed") === "1") return;
+  $("#cutoff-banner").classList.remove("hidden");
+}
+
+function showUnlabelledBanner(latestSession) {
+  const el = $("#unlabelled-banner");
+  if (!latestSession || latestSession.label) {
+    el.classList.add("hidden");
+    return;
+  }
+  el.innerHTML = `
+    <span><strong>⚠ New session needs labelling:</strong> ${latestSession.session_key}
+    (started ${latestSession.started}). <a onclick="switchTab('sessions'); openLabelModal('${latestSession.session_key}')">Label it now →</a></span>
+    <button class="banner-dismiss" onclick="document.getElementById('unlabelled-banner').classList.add('hidden')">×</button>
+  `;
+  el.classList.remove("hidden");
+}
+
+function showNewSessionToast(sessionKey) {
+  const el = $("#new-session-toast");
+  el.innerHTML = `<strong>New session detected:</strong> ${sessionKey}.
+                  <a onclick="switchTab('sessions')">View →</a>`;
+  el.classList.remove("hidden");
+  setTimeout(() => el.classList.add("hidden"), 8000);
+}
+
+// ---------- AUTO-POLL ----------
+let _lastSessionKey = null;
+async function pollForUpdates() {
+  try {
+    const d = await apiGet("/api/dashboard");
+    const ls = d.latest_session;
+    if (!ls) return;
+    if (_lastSessionKey === null) {
+      _lastSessionKey = ls.session_key;
+    } else if (ls.session_key !== _lastSessionKey) {
+      _lastSessionKey = ls.session_key;
+      showNewSessionToast(ls.session_key);
+      // refresh whichever tab is active
+      const active = $(".tab.active").dataset.tab;
+      switchTab(active);
+    }
+    // Also refresh unlabelled banner state
+    if (ls && !d.latest_label) {
+      showUnlabelledBanner({...ls, label: null});
+    } else {
+      $("#unlabelled-banner").classList.add("hidden");
+    }
+  } catch (e) { /* ignore */ }
+}
+setInterval(pollForUpdates, 30000);  // every 30s
 
 // ---------- DASHBOARD ----------
 async function loadDashboard() {
@@ -33,6 +95,9 @@ async function loadDashboard() {
   el.innerHTML = '<p class="loading">Loading…</p>';
   try {
     const d = await apiGet("/api/dashboard");
+    _lastSessionKey = d.latest_session ? d.latest_session.session_key : null;
+    showUnlabelledBanner(d.latest_session ? {...d.latest_session, label: d.latest_label} : null);
+
     const trendCounts = Object.entries(d.by_trend || {}).map(([k,v]) => `<span class="badge ${k}">${k} ${v}</span>`).join(" ");
     const statusCounts = Object.entries(d.by_status || {}).map(([k,v]) => `<span class="status-pill ${k}">${k}: ${v}</span>`).join(" ");
 
@@ -62,7 +127,7 @@ async function loadDashboard() {
         <div style="margin-top: 6px;">${statusCounts || '—'}</div>
       </div>
       <div class="card" style="grid-column: span 2;">
-        <div class="label">Trend breakdown</div>
+        <div class="label">Trend breakdown <span class="tooltip" data-tip="IMPROVING = reconditioning is working. PLATEAU = peaked. STABLE = at ceiling. DECLINING = over-cycled. DEAD = scrap.">ⓘ</span></div>
         <div style="margin-top: 6px;">${trendCounts || '—'}</div>
       </div>
     `;
@@ -84,11 +149,18 @@ async function loadSessions() {
       const labelText = s.label
         ? `Battery <strong>${s.label.battery}</strong>, cells ${s.label.cell_start}–${s.label.cell_end}`
         : `<em style="color: var(--danger);">unlabelled</em>`;
+      const trendBadges = Object.entries(s.trend_dist || {})
+        .map(([k,v]) => `<span class="badge ${k}" style="font-size:10px">${k} ${v}</span>`)
+        .join(" ");
+      const capRange = s.cap_range
+        ? `<span style="color: var(--muted); margin-left: 12px;">cap ${fmt(s.cap_range[0])}–${fmt(s.cap_range[1])} Ah</span>`
+        : "";
       return `
         <div class="session-row ${cls}">
           <div class="info">
-            <div><strong>${s.session_key}</strong> · ${s.started}</div>
+            <div><strong>${s.session_key}</strong> · ${s.started} ${capRange}</div>
             <div class="meta">channels ${s.channels.join(", ")} · ${labelText}</div>
+            <div class="meta" style="margin-top: 4px;">${trendBadges}</div>
           </div>
           <button class="btn-primary" onclick="openLabelModal('${s.session_key}')">${s.label ? "Re-label" : "Label"}</button>
         </div>`;
@@ -140,6 +212,7 @@ async function openLabelModal(sessionKey) {
       if (r.error) { alert(r.error); return; }
       closeModal("label-modal");
       loadSessions();
+      $("#unlabelled-banner").classList.add("hidden");
     };
   } catch (e) {
     $("#label-channels-preview").innerHTML = `<div class="error-msg">${e}</div>`;
@@ -148,8 +221,10 @@ async function openLabelModal(sessionKey) {
 
 function closeModal(id) { $("#" + id).classList.add("hidden"); }
 
-// ---------- POOL ----------
+// ---------- POOL with bulk select + inline edit ----------
 let _pool = [];
+let _bulkSelection = new Set();
+
 async function loadPool() {
   const wrap = $("#pool-table-wrap");
   wrap.innerHTML = '<p class="loading">Loading…</p>';
@@ -167,6 +242,8 @@ $("#filter-battery").addEventListener("change", renderPool);
 $("#filter-status").addEventListener("change", renderPool);
 $("#filter-trend").addEventListener("change", renderPool);
 
+function refKey(m) { return `${m.session_key}|${m.channel}`; }
+
 function renderPool() {
   const fb = $("#filter-battery").value;
   const fs = $("#filter-status").value;
@@ -178,24 +255,29 @@ function renderPool() {
   rows.sort((a,b) => (b.cap_ah || 0) - (a.cap_ah || 0));
 
   $("#pool-count").textContent = `${rows.length} of ${_pool.length} modules`;
+  updateBulkBar();
 
   const html = `
     <table>
       <thead><tr>
-        <th>Battery / Cell</th>
+        <th><input type="checkbox" id="select-all-pool" onclick="bulkToggleAll(this.checked)"></th>
+        <th>Battery</th><th>Cell #</th>
         <th>Session · CH</th>
-        <th>Cap (Ah)</th>
-        <th>IR (mΩ)</th>
-        <th>Vend (V)</th>
+        <th>Cap (Ah)</th><th>IR (mΩ)</th><th>Vend (V)</th>
         <th>Trend</th>
         <th>Cycles</th>
         <th>Status</th>
         <th>Notes</th>
       </tr></thead>
       <tbody>
-        ${rows.map(m => `
+        ${rows.map(m => {
+          const k = refKey(m);
+          const checked = _bulkSelection.has(k) ? "checked" : "";
+          return `
           <tr>
-            <td>${ m.battery ? `<strong>${m.battery}</strong>-${m.cell_position ?? '?'}` : '<em style="color: var(--danger)">unlabelled</em>' }</td>
+            <td><input type="checkbox" class="pool-checkbox" data-ref="${k}" ${checked} onclick="bulkToggle('${k}', this.checked)"></td>
+            <td><input type="text" class="pool-inline-edit batt-edit" data-sk="${m.session_key}" data-ch="${m.channel}" value="${escapeHtml(m.battery||'')}" maxlength="2" placeholder="—"></td>
+            <td><input type="number" class="pool-inline-edit cell-edit" data-sk="${m.session_key}" data-ch="${m.channel}" value="${m.cell_position||''}" min="1" max="28" placeholder="—"></td>
             <td><span style="font-family: monospace; font-size: 11px;">${m.session_key}</span> · CH${m.channel}</td>
             <td>${fmt(m.cap_ah)}</td>
             <td>${fmt(m.ir_mohm, 1)}</td>
@@ -208,34 +290,73 @@ function renderPool() {
               </select>
             </td>
             <td><input type="text" class="notes-edit" data-sk="${m.session_key}" data-ch="${m.channel}" value="${escapeHtml(m.notes||'')}" style="width: 140px; padding: 3px 6px; font-size: 12px;"></td>
-          </tr>
-        `).join("")}
+          </tr>`;
+        }).join("")}
       </tbody>
     </table>`;
   $("#pool-table-wrap").innerHTML = html;
 
-  $$(".status-edit").forEach(sel => sel.addEventListener("change", async e => {
+  // wire inline edits
+  $$(".batt-edit").forEach(inp => inp.addEventListener("blur", async () => {
+    await apiPost("/api/modules/override", {
+      session_key: inp.dataset.sk, channel: inp.dataset.ch, battery: inp.value.trim().toUpperCase(),
+    });
+    loadPool();
+  }));
+  $$(".cell-edit").forEach(inp => inp.addEventListener("blur", async () => {
+    await apiPost("/api/modules/override", {
+      session_key: inp.dataset.sk, channel: inp.dataset.ch, cell_position: inp.value || null,
+    });
+    loadPool();
+  }));
+  $$(".status-edit").forEach(sel => sel.addEventListener("change", async () => {
     await apiPost("/api/modules/override", {
       session_key: sel.dataset.sk, channel: sel.dataset.ch, status: sel.value,
     });
     loadPool();
   }));
-  $$(".notes-edit").forEach(inp => inp.addEventListener("blur", async e => {
+  $$(".notes-edit").forEach(inp => inp.addEventListener("blur", async () => {
     await apiPost("/api/modules/override", {
       session_key: inp.dataset.sk, channel: inp.dataset.ch, notes: inp.value,
     });
   }));
 }
 
-function escapeHtml(s) {
-  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);
+// ---------- BULK SELECT ----------
+function bulkToggle(k, on) { if (on) _bulkSelection.add(k); else _bulkSelection.delete(k); updateBulkBar(); }
+function bulkToggleAll(on) {
+  $$(".pool-checkbox").forEach(cb => {
+    cb.checked = on;
+    if (on) _bulkSelection.add(cb.dataset.ref);
+    else    _bulkSelection.delete(cb.dataset.ref);
+  });
+  updateBulkBar();
+}
+function bulkClear() { _bulkSelection.clear(); $("#select-all-pool").checked = false; renderPool(); }
+
+function updateBulkBar() {
+  const bar = $("#bulk-bar");
+  if (_bulkSelection.size === 0) { bar.classList.add("hidden"); return; }
+  bar.classList.remove("hidden");
+  $("#bulk-count").textContent = `${_bulkSelection.size} module(s) selected`;
+}
+
+async function bulkSetStatus(status) {
+  const refs = Array.from(_bulkSelection).map(k => {
+    const [sk, ch] = k.split("|");
+    return { session_key: sk, channel: parseInt(ch) };
+  });
+  if (!refs.length) return;
+  if (!confirm(`Set ${refs.length} module(s) to "${status}"?`)) return;
+  await apiPost("/api/modules/bulk", { refs, status });
+  _bulkSelection.clear();
+  loadPool();
 }
 
 // ---------- BUILD ----------
 let _previewedPack = null;
 
 async function loadBuildForm() {
-  // populate battery dropdown
   try {
     const pool = await apiGet("/api/pool");
     const batteries = [...new Set(pool.map(m => m.battery).filter(Boolean))].sort();
@@ -243,25 +364,20 @@ async function loadBuildForm() {
     sel.innerHTML = '<option value="ANY">any (use whole pool)</option>' + batteries.map(b => `<option value="${b}">${b}</option>`).join("");
   } catch (e) { /* ignore */ }
 
-  // bind submit
   $("#build-form").onsubmit = async (e) => {
     e.preventDefault();
-    const f = e.target;
-    const body = {
-      target_battery:    f.target_battery.value,
-      allow_borrow:      f.allow_borrow.checked,
-      strategy:          f.strategy.value,
-      thermal_placement: f.thermal_placement.checked,
-      target_blocks:     parseInt(f.target_blocks.value),
-      cap_floor_reuse:   parseFloat(f.cap_floor_reuse.value),
-      ir_ceiling_module: parseFloat(f.ir_ceiling_module.value),
-      max_pack_cap_spread: parseFloat(f.max_pack_cap_spread.value),
-      max_pack_ir_spread:  parseFloat(f.max_pack_ir_spread.value),
-      destination:       f.destination.value,
-    };
+    const body = readBuildForm();
     $("#build-result").innerHTML = '<p class="loading">Building pack…</p>';
     const pack = await apiPost("/api/packs/preview", body);
     renderPackResult(pack);
+  };
+
+  $("#compare-strategies-btn").onclick = async () => {
+    const body = readBuildForm();
+    delete body.strategy;
+    $("#build-result").innerHTML = '<p class="loading">Comparing all 3 strategies…</p>';
+    const res = await apiPost("/api/packs/compare", body);
+    renderStrategyCompare(res);
   };
 
   $("#save-pack-btn").onclick = async () => {
@@ -278,12 +394,78 @@ async function loadBuildForm() {
   };
 }
 
-function renderPackResult(pack) {
-  if (pack.error) {
-    $("#build-result").innerHTML = `<div class="error-msg">⚠ ${pack.error}</div>`;
-    if (pack.candidate_summary) {
-      $("#build-result").innerHTML += summarizeCandidates(pack.candidate_summary);
+function readBuildForm() {
+  const f = $("#build-form");
+  return {
+    target_battery:    f.target_battery.value,
+    allow_borrow:      f.allow_borrow.checked,
+    strategy:          f.strategy.value,
+    thermal_placement: f.thermal_placement.checked,
+    target_blocks:     parseInt(f.target_blocks.value),
+    cap_floor_reuse:   parseFloat(f.cap_floor_reuse.value),
+    ir_ceiling_module: parseFloat(f.ir_ceiling_module.value),
+    max_pack_cap_spread: parseFloat(f.max_pack_cap_spread.value),
+    max_pack_ir_spread:  parseFloat(f.max_pack_ir_spread.value),
+    destination:       f.destination.value,
+  };
+}
+
+function renderStrategyCompare(results) {
+  const order = [
+    ["pair_opposites", "Pair-opposites", "Mask weak cells, ECU-friendly. Standard for daily-driver."],
+    ["match_similar",  "Match-similar",  "Strong-with-strong. Better diagnostics, weak blocks fail visibly."],
+    ["capacity_only",  "Capacity-only",  "Take top N by cap, pair adjacent. Simplest."],
+  ];
+
+  // Pick best by grade
+  const gradeRank = {A:5,B:4,C:3,D:2,F:1};
+  let bestName = null, bestRank = -1;
+  for (const [k] of order) {
+    const p = results[k];
+    if (p && !p.error) {
+      const r = gradeRank[p.grade] || 0;
+      if (r > bestRank) { bestRank = r; bestName = k; }
     }
+  }
+
+  const cards = order.map(([k, name, blurb]) => {
+    const p = results[k];
+    if (!p || p.error) {
+      return `<div class="strategy-card">
+        <div class="strat-name">${name}</div>
+        <div style="color: var(--muted); font-size: 12px;">${blurb}</div>
+        <div style="margin-top: 8px; color: var(--danger); font-size: 13px;">${p?.error || 'unavailable'}</div>
+      </div>`;
+    }
+    const recommended = k === bestName ? "recommended" : "";
+    return `<div class="strategy-card ${recommended}" onclick="renderPackResult(${escapeHtml(JSON.stringify(p))})">
+      <div class="strat-name">${name} ${recommended ? '★ best' : ''}</div>
+      <div style="color: var(--muted); font-size: 12px;">${blurb}</div>
+      <div style="margin-top: 10px;">
+        <span class="strat-grade pack-grade ${p.grade}">${p.grade}</span>
+        <span style="font-size: 12px; margin-left: 8px;">${p.predicted_life}</span>
+      </div>
+      <div class="strat-stat">avg ${fmt(p.avg_cap)} Ah · spread ${fmt(p.cap_spread)} Ah · weakest ${fmt(p.weakest_cap)} Ah</div>
+      <div class="strat-stat" style="margin-top: 4px; color: var(--primary)">click to see details →</div>
+    </div>`;
+  }).join("");
+
+  $("#build-result").innerHTML = `
+    <h3 style="margin-top: 18px;">Strategy comparison</h3>
+    <p class="hint">All 3 strategies on the same eligible pool. Click a card to see its block layout.</p>
+    <div class="strategy-compare">${cards}</div>
+  `;
+}
+
+function renderPackResult(pack) {
+  // pack may arrive serialized as a string from onclick
+  if (typeof pack === "string") { try { pack = JSON.parse(pack); } catch (_) {} }
+
+  if (pack.error) {
+    let html = `<div class="error-msg">⚠ ${pack.error}</div>`;
+    if (pack.candidate_summary) html += summarizeCandidates(pack.candidate_summary);
+    if (pack.rejected_modules?.length) html += renderRejected(pack.rejected_modules);
+    $("#build-result").innerHTML = html;
     _previewedPack = null;
     $("#save-pack-btn").disabled = true;
     return;
@@ -304,12 +486,14 @@ function renderPackResult(pack) {
   `).join("");
 
   const reasons = (pack.reasons || []).map(r => `<div>• ${r}</div>`).join("");
+  const swaps = (pack.swap_suggestions || []).map(s => `<div>• ${s}</div>`).join("");
 
   $("#build-result").innerHTML = `
     <div class="pack-summary">
       <div>
         <span class="pack-grade ${pack.grade}">${pack.grade}</span>
         <span class="predicted-life">Predicted life in service: <strong>${pack.predicted_life}</strong></span>
+        <span class="tooltip" data-tip="Estimates from PriusChat refurb-life threads, Hybrid Automotive guides, and reconditioner blogs. Real-world life depends on driver habits, climate, and luck. ±50% range typical." style="margin-left: 6px; color: var(--muted)">ⓘ</span>
         <span style="color: var(--muted); margin-left: 12px;">(${pack.grade_name})</span>
       </div>
       <div class="pack-stats">
@@ -321,6 +505,7 @@ function renderPackResult(pack) {
         <div class="stat"><span class="label">Strategy</span><span class="value">${pack.strategy}</span></div>
       </div>
       ${ reasons ? `<div class="pack-reasons">${reasons}</div>` : '' }
+      ${ swaps ? `<div class="swap-suggestions"><h4>How to improve this pack</h4>${swaps}</div>` : '' }
     </div>
     ${ pack.candidate_summary ? summarizeCandidates(pack.candidate_summary) : '' }
     <table>
@@ -334,6 +519,7 @@ function renderPackResult(pack) {
       </tr></thead>
       <tbody>${blocks}</tbody>
     </table>
+    ${ pack.rejected_modules?.length ? renderRejected(pack.rejected_modules) : '' }
   `;
 }
 
@@ -346,6 +532,18 @@ function moduleCell(m) {
 function summarizeCandidates(s) {
   const byBat = Object.entries(s.by_battery || {}).map(([k,v]) => `${k}: ${v}`).join(" · ");
   return `<p style="color: var(--muted); font-size: 13px;">Candidate pool: ${s.eligible} eligible of ${s.total_modules} total (${byBat || 'none labelled yet'})</p>`;
+}
+
+function renderRejected(rejected) {
+  const rows = rejected.slice(0, 50).map(m => {
+    const tag = m.battery ? `${m.battery}-${m.cell_position}` : `${m.session_key} CH${m.channel}`;
+    return `<div class="row"><strong>${tag}</strong> · cap ${fmt(m.cap_ah)} Ah · IR ${fmt(m.ir_mohm,1)} mΩ · ${m.reject_reasons.join(', ')}</div>`;
+  }).join("");
+  return `<div class="rejected-list">
+    <h4>${rejected.length} module(s) rejected from candidate pool</h4>
+    ${rows}
+    ${rejected.length > 50 ? `<div style="margin-top: 6px; color: var(--muted)">…and ${rejected.length-50} more</div>` : ''}
+  </div>`;
 }
 
 // ---------- HISTORY ----------
@@ -397,4 +595,5 @@ function refreshAll() {
 }
 
 // ---------- init ----------
+showCutoffReminder();
 loadDashboard();

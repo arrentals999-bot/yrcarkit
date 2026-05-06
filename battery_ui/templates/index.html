@@ -19,6 +19,16 @@
   </nav>
 </header>
 
+<!-- Sticky banners -->
+<div id="banners">
+  <div id="cutoff-banner" class="banner banner-info hidden">
+    <strong>YRCARKIT tip:</strong> Set discharge cutoff voltage to <strong>6.000 V</strong> (currently 6.400) for industry-comparable cap readings. One-time change in the YRCARKIT Custom-06 program.
+    <button class="banner-dismiss" onclick="dismissBanner('cutoff-banner','cutoff-dismissed')">×</button>
+  </div>
+  <div id="unlabelled-banner" class="banner banner-warn hidden"></div>
+  <div id="new-session-toast" class="toast hidden"></div>
+</div>
+
 <main>
 
   <!-- ============== DASHBOARD ============== -->
@@ -87,6 +97,14 @@
       </select></label>
       <span id="pool-count"></span>
     </div>
+
+    <div id="bulk-bar" class="bulk-bar hidden">
+      <span id="bulk-count">0 selected</span>
+      <button class="btn-danger" onclick="bulkSetStatus('retired')">Mark as retired</button>
+      <button class="btn-danger" onclick="bulkSetStatus('dead')">Mark as dead</button>
+      <button class="btn-cancel" onclick="bulkSetStatus('available')">Set available</button>
+      <button class="btn-cancel" onclick="bulkClear()">Clear selection</button>
+    </div>
     <div id="pool-table-wrap"><p class="loading">Loading…</p></div>
   </section>
 
@@ -102,8 +120,9 @@
       <label><input type="checkbox" name="allow_borrow" checked> Allow borrowing from other batteries</label>
       <label>Strategy:
         <select name="strategy">
-          <option value="pair_opposites" selected>Pair-opposites (recommended)</option>
-          <option value="match_similar">Match-similar</option>
+          <option value="pair_opposites" selected>Pair-opposites (recommended for daily-driver)</option>
+          <option value="match_similar">Match-similar (diagnostic)</option>
+          <option value="capacity_only">Capacity-only (simple)</option>
         </select>
       </label>
       <label><input type="checkbox" name="thermal_placement" checked> Thermal placement (weak to outer ends)</label>
@@ -123,7 +142,8 @@
 
       <div class="actions">
         <button type="submit" class="btn-primary">Preview pack</button>
-        <button type="button" id="save-pack-btn" class="btn-success" disabled>Save & lock modules</button>
+        <button type="button" id="compare-strategies-btn" class="btn-secondary">Compare all 3 strategies</button>
+        <button type="button" id="save-pack-btn" class="btn-success" disabled>Save &amp; lock modules</button>
       </div>
     </form>
 
