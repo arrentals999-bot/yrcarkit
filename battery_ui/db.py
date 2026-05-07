@@ -310,28 +310,41 @@ def get_module_override(session_key, channel):
     return dict(row) if row else None
 
 
-def save_module_override(session_key, channel, battery=None, cell_position=None,
-                         status=None, notes=None):
+_SENTINEL = object()  # signals "field not supplied — preserve existing value"
+
+
+def save_module_override(session_key, channel, battery=_SENTINEL, cell_position=_SENTINEL,
+                         status=_SENTINEL, notes=_SENTINEL):
+    """Update an override.
+    Pass _SENTINEL (default) to PRESERVE the existing value of that field.
+    Pass None to CLEAR the field (set it to NULL in DB).
+    Pass a value to SET it.
+    If after the update all fields are empty/default, the row is deleted entirely.
+    """
     existing = get_module_override(session_key, channel) or {
         "battery": None, "cell_position": None, "status": "available", "notes": ""
     }
-    new = {
-        "battery": battery if battery is not None else existing.get("battery"),
-        "cell_position": cell_position if cell_position is not None else existing.get("cell_position"),
-        "status": status if status is not None else existing.get("status"),
-        "notes": notes if notes is not None else existing.get("notes"),
-    }
+    new_battery = existing.get("battery") if battery is _SENTINEL else battery
+    new_cell    = existing.get("cell_position") if cell_position is _SENTINEL else cell_position
+    new_status  = existing.get("status") if status is _SENTINEL else (status or "available")
+    new_notes   = existing.get("notes") if notes is _SENTINEL else (notes or "")
+
     conn = get_local_conn()
-    conn.execute("""
-        INSERT INTO module_overrides (session_key, channel, battery, cell_position, status, notes)
-        VALUES (?, ?, ?, ?, ?, ?)
-        ON CONFLICT(session_key, channel) DO UPDATE SET
-            battery=excluded.battery,
-            cell_position=excluded.cell_position,
-            status=excluded.status,
-            notes=excluded.notes
-    """, (session_key, channel, new["battery"], new["cell_position"],
-          new["status"], new["notes"]))
+    # if everything is empty/default, just delete the row
+    if (new_battery is None and new_cell is None
+            and new_status == "available" and not new_notes):
+        conn.execute("DELETE FROM module_overrides WHERE session_key=? AND channel=?",
+                     (session_key, channel))
+    else:
+        conn.execute("""
+            INSERT INTO module_overrides (session_key, channel, battery, cell_position, status, notes)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(session_key, channel) DO UPDATE SET
+                battery=excluded.battery,
+                cell_position=excluded.cell_position,
+                status=excluded.status,
+                notes=excluded.notes
+        """, (session_key, channel, new_battery, new_cell, new_status, new_notes))
     conn.commit()
     conn.close()
 

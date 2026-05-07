@@ -26,14 +26,19 @@ DEFAULT_THRESHOLDS = {
 def classify_trend(discharge_caps):
     """Given the per-cycle discharge cap series (oldest first), return a label.
     IMPROVING / STABLE / PLATEAU / DECLINING / DEAD / UNKNOWN
+
+    A module needs at least 2 completed discharge cycles to be classified —
+    a fresh in-progress session shouldn't be labelled DEAD just because the
+    first cycle is partway done.
     """
     if not discharge_caps:
+        return "UNKNOWN"
+    if len(discharge_caps) < 2:
+        # In-progress / incomplete — don't pre-judge
         return "UNKNOWN"
     peak = max(discharge_caps)
     if peak < 0.3:
         return "DEAD"
-    if len(discharge_caps) < 2:
-        return "UNKNOWN"
 
     first, last = discharge_caps[0], discharge_caps[-1]
     pct_change = (last - first) / first * 100 if first > 0 else 0

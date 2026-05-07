@@ -121,6 +121,17 @@ def api_label_session(session_key):
     if cell_start < 1 or cell_end > 28 or cell_end < cell_start:
         return jsonify({"error": "cell range must be within 1-28 and ascending"}), 400
 
+    # Validate cell-range count matches the active channel count
+    sessions = {s["session_key"]: s for s in db.scan_sessions()}
+    if session_key not in sessions:
+        return jsonify({"error": f"session {session_key} not found"}), 404
+    active_channels = [c for c in sessions[session_key]["channels"] if c not in skip]
+    n_cells = cell_end - cell_start + 1
+    if n_cells != len(active_channels):
+        return jsonify({"error":
+            f"cell range covers {n_cells} cells but {len(active_channels)} channels are active "
+            f"({active_channels}). Either widen the range or add channels to skip list."}), 400
+
     db.save_session_label(session_key, battery, cell_start, cell_end, skip, notes)
     return jsonify({"ok": True})
 
@@ -215,16 +226,30 @@ def api_module_detail(session_key, channel):
 
 @app.post("/api/modules/override")
 def api_module_override():
+    """Update an override. Fields are only changed if the request body
+    explicitly contains the key. Pass null/'' to clear, or a value to set."""
     data = request.get_json(force=True)
     sk = data.get("session_key")
     ch = int(data.get("channel"))
-    db.save_module_override(
-        sk, ch,
-        battery=(data.get("battery") or None),
-        cell_position=int(data["cell_position"]) if data.get("cell_position") not in (None, "") else None,
-        status=data.get("status"),
-        notes=data.get("notes"),
-    )
+
+    # Only forward keys actually present — otherwise preserve existing
+    kwargs = {}
+    if "battery" in data:
+        v = data["battery"]
+        kwargs["battery"] = (v.strip().upper() if isinstance(v, str) and v.strip() else None)
+    if "cell_position" in data:
+        v = data["cell_position"]
+        if v is None or v == "":
+            kwargs["cell_position"] = None
+        else:
+            try: kwargs["cell_position"] = int(v)
+            except (TypeError, ValueError): kwargs["cell_position"] = None
+    if "status" in data:
+        kwargs["status"] = data["status"] or "available"
+    if "notes" in data:
+        kwargs["notes"] = data["notes"] or ""
+
+    db.save_module_override(sk, ch, **kwargs)
     return jsonify({"ok": True})
 
 
