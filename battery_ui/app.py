@@ -410,6 +410,85 @@ def api_thresholds():
     return jsonify(pairing.DEFAULT_THRESHOLDS)
 
 
+@app.get("/api/cloud-status")
+def api_cloud_status():
+    """Return when the last cloud-backup happened and any pending changes."""
+    import subprocess, os, time
+    log_path = HERE.parent / "auto_push.log"
+    last_push = None
+    last_status = None
+    if log_path.exists():
+        try:
+            with open(log_path, encoding="utf-8") as f:
+                lines = f.readlines()[-20:]
+            for line in reversed(lines):
+                if "Push complete." in line:
+                    last_push = line.split("  ")[0].strip()
+                    last_status = "ok"
+                    break
+                if "Push failed" in line:
+                    last_push = line.split("  ")[0].strip()
+                    last_status = "failed"
+                    break
+                if "No changes." in line:
+                    last_push = line.split("  ")[0].strip()
+                    last_status = "no-changes"
+                    break
+        except Exception:
+            pass
+
+    # check pending git changes
+    repo = HERE.parent
+    try:
+        out = subprocess.run(
+            ["git", "status", "--porcelain"],
+            cwd=str(repo), capture_output=True, text=True, timeout=10
+        )
+        pending = [l for l in out.stdout.strip().split("\n") if l.strip()]
+        pending_count = len(pending)
+    except Exception:
+        pending_count = -1
+
+    return jsonify({
+        "last_push_at":  last_push,
+        "last_push_status": last_status,
+        "pending_changes": pending_count,
+        "scheduled_every": "15 minutes",
+    })
+
+
+@app.post("/api/cloud-status/sync-now")
+def api_sync_now():
+    """Trigger auto_push.ps1 immediately. Streams the result back."""
+    import subprocess
+    script = HERE.parent / "auto_push.ps1"
+    if not script.exists():
+        return jsonify({"error": "auto_push.ps1 not found"}), 500
+    try:
+        proc = subprocess.run(
+            ["powershell.exe", "-ExecutionPolicy", "Bypass", "-File", str(script)],
+            capture_output=True, text=True, timeout=120
+        )
+        # Read the latest log lines to report what happened
+        log_path = HERE.parent / "auto_push.log"
+        tail = ""
+        if log_path.exists():
+            try:
+                with open(log_path, encoding="utf-8") as f:
+                    tail = "".join(f.readlines()[-6:])
+            except Exception:
+                pass
+        return jsonify({
+            "ok": proc.returncode == 0,
+            "exit_code": proc.returncode,
+            "log_tail": tail,
+        })
+    except subprocess.TimeoutExpired:
+        return jsonify({"error": "push took longer than 120s"}), 504
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 # ----------------------- API: dashboard summary -----------------------
 
 @app.get("/api/live")

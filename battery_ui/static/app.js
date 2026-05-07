@@ -100,6 +100,60 @@ function startPolling() {
 }
 startPolling();
 
+// ---------- CLOUD STATUS / SYNC NOW ----------
+async function loadCloudStatus() {
+  const el = document.getElementById("cloud-status-content");
+  if (!el) return;
+  try {
+    const s = await apiGet("/api/cloud-status");
+    const status = s.last_push_status;
+    let dot = "🟢", phrase;
+    if (status === "ok")            phrase = "Last push complete";
+    else if (status === "no-changes") phrase = "No changes (idle)";
+    else if (status === "failed")   { dot = "🔴"; phrase = "Last push FAILED"; }
+    else                            { dot = "🟡"; phrase = "Status unknown"; }
+
+    const pending = s.pending_changes;
+    const pendingTxt = pending > 0
+      ? `<span style="color: var(--warn);">${pending} unsaved file(s) waiting</span>`
+      : `<span style="color: var(--success);">all changes saved</span>`;
+
+    el.innerHTML = `
+      <div style="display: flex; align-items: center; gap: 10px;">
+        <div style="flex: 1;">
+          <div style="font-size: 14px;">${dot} ${phrase}</div>
+          <div style="font-size: 11px; color: var(--muted); margin-top: 3px;">
+            ${s.last_push_at || "no record"} · auto every ${s.scheduled_every} · ${pendingTxt}
+          </div>
+        </div>
+        <button class="btn-primary" id="sync-now-btn" onclick="syncCloudNow()" style="padding: 6px 14px; font-size: 12px;">Sync now</button>
+      </div>
+    `;
+  } catch (e) {
+    el.innerHTML = `<span style="color: var(--danger);">cloud status unavailable</span>`;
+  }
+}
+
+async function syncCloudNow() {
+  const btn = document.getElementById("sync-now-btn");
+  if (btn) { btn.disabled = true; btn.textContent = "syncing…"; }
+  try {
+    const r = await apiPost("/api/cloud-status/sync-now", {});
+    if (r.error) {
+      alert("Sync failed: " + r.error);
+    } else if (r.ok) {
+      // brief popup with the result
+      const last = r.log_tail.split("\n").filter(l => l.trim()).slice(-3).join("\n");
+      alert("Push complete!\n\n" + last);
+    } else {
+      alert("Push exited with code " + r.exit_code + "\n\n" + (r.log_tail || ""));
+    }
+  } catch (e) {
+    alert("Sync error: " + e);
+  }
+  loadCloudStatus();
+}
+
 // ---------- LIVE PANEL ----------
 async function loadLive() {
   try {
@@ -206,6 +260,10 @@ async function loadDashboard() {
       <div class="card"><div class="label">Total modules tested</div><div class="value">${d.total_modules}</div></div>
       <div class="card"><div class="label">Sessions</div><div class="value">${d.session_count}</div></div>
       <div class="card"><div class="label">Packs built</div><div class="value">${d.pack_count}</div></div>
+      <div id="cloud-card" class="card" style="grid-column: span 2;">
+        <div class="label">Cloud backup (GitHub)</div>
+        <div id="cloud-status-content" style="margin-top: 6px;">checking…</div>
+      </div>
       <div class="card" style="grid-column: span 2;">
         <div class="label">Status breakdown</div>
         <div style="margin-top: 6px;">${statusCounts || '—'}</div>
@@ -215,6 +273,7 @@ async function loadDashboard() {
         <div style="margin-top: 6px;">${trendCounts || '—'}</div>
       </div>
     `;
+    loadCloudStatus();
   } catch (e) {
     el.innerHTML = `<div class="error-msg">Failed to load dashboard: ${e}</div>`;
   }
