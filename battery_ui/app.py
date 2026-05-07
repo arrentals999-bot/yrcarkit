@@ -10,7 +10,7 @@ import webbrowser
 from pathlib import Path
 from threading import Timer
 
-from flask import Flask, jsonify, request, render_template, abort
+from flask import Flask, jsonify, request, render_template, abort, Response
 
 # Allow running as script or module
 HERE = Path(__file__).resolve().parent
@@ -22,6 +22,47 @@ from battery_ui import db, pairing  # noqa: E402
 app = Flask(__name__,
             template_folder=str(HERE / "templates"),
             static_folder=str(HERE / "static"))
+
+
+# ---------- HTTP Basic Auth (only enforced on non-loopback requests) ----------
+# Reads credentials from tunnel/credentials.json. If that file is absent,
+# auth is disabled entirely (development / no-tunnel mode).
+
+CREDS_PATH = HERE.parent / "tunnel" / "credentials.json"
+
+
+def _load_creds():
+    try:
+        with open(CREDS_PATH) as f:
+            d = json.load(f)
+        return d.get("username"), d.get("password")
+    except Exception:
+        return None, None
+
+
+@app.before_request
+def _enforce_auth():
+    user, pw = _load_creds()
+    if not user or not pw:
+        return None  # auth disabled — no creds file
+    # Tunnel detection: Cloudflare adds X-Forwarded-For + Cf-Connecting-IP
+    # on every proxied request. If neither is present, the request came
+    # from real loopback (laptop user) and we skip auth for convenience.
+    via_tunnel = bool(
+        request.headers.get("Cf-Connecting-IP")
+        or request.headers.get("X-Forwarded-For")
+        or request.headers.get("Cf-Ray")
+    )
+    if not via_tunnel:
+        return None
+    auth = request.authorization
+    if not auth or auth.username != user or auth.password != pw:
+        return Response(
+            "Authentication required",
+            401,
+            {"WWW-Authenticate": 'Basic realm="Ratans Private Battery Manager"'},
+        )
+    return None
 
 
 # ----------------------- views -----------------------

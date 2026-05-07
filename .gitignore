@@ -24,6 +24,12 @@ battery_ui/battery_ui.db-journal
 battery_ui/battery_ui.db-wal
 battery_ui/battery_ui.db-shm
 
+# Cloudflare tunnel binary (62 MB, downloadable on demand) + secrets
+tunnel/cloudflared.exe
+tunnel/credentials.json
+tunnel/tunnel-url.txt
+tunnel/tunnel.log
+
 # OS junk
 Thumbs.db
 Desktop.ini
