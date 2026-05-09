@@ -148,6 +148,100 @@ def api_session_detail(session_key):
     })
 
 
+@app.get("/api/labelling/suggest-next")
+def api_suggest_next_label():
+    """When a new YRCARKIT session appears, compute likely-correct labels
+    based on the current routine: continue current battery, or start a new one,
+    or set aside as testing."""
+    sessions = db.scan_sessions()
+    if not sessions:
+        return jsonify({"current_battery": None, "suggestions": []})
+
+    # Walk all session labels to figure out where each battery stands
+    conn = db.get_local_conn()
+    labels = {r["session_key"]: dict(r) for r in conn.execute(
+        "SELECT * FROM session_labels WHERE session_type='production'"
+    )}
+    conn.close()
+
+    battery_progress = {}  # battery -> set of cell positions covered
+    for sk, lbl in labels.items():
+        bat = lbl["battery"]
+        battery_progress.setdefault(bat, set())
+        for c in range(lbl["cell_start"], lbl["cell_end"] + 1):
+            battery_progress[bat].add(c)
+
+    suggestions = []
+    # Find the most recent battery being worked on (still has < 28 labelled)
+    in_progress = sorted(
+        [(b, len(c)) for b, c in battery_progress.items() if len(c) < 28],
+        key=lambda x: -x[1]
+    )
+    if in_progress:
+        bat, count = in_progress[0]
+        covered = battery_progress[bat]
+        # find next gap
+        next_start = None
+        for c in range(1, 29):
+            if c not in covered:
+                next_start = c
+                break
+        if next_start:
+            next_end = min(next_start + 6, 28)
+            # extend forward only as far as 7 contiguous unlabelled cells
+            for c in range(next_start + 1, next_end + 1):
+                if c in covered:
+                    next_end = c - 1
+                    break
+            suggestions.append({
+                "kind": "continue_battery",
+                "label": f"Continue Battery {bat} - cells {next_start} to {next_end}",
+                "battery": bat,
+                "cell_start": next_start,
+                "cell_end": next_end,
+                "session_type": "production",
+                "explanation": f"Battery {bat} has {count}/28 cells labelled. Next gap is cells {next_start}-{next_end}.",
+            })
+
+    # Suggest a new battery letter (next available after the latest)
+    used = sorted(battery_progress.keys())
+    next_letter = "A"
+    if used:
+        # Pick next letter after the highest used (skipping TEST)
+        real = [b for b in used if b != "TEST"]
+        if real:
+            last = max(real)
+            if last < "Z":
+                next_letter = chr(ord(last) + 1)
+            else:
+                next_letter = "AA"  # extreme edge
+    suggestions.append({
+        "kind": "new_battery",
+        "label": f"Start new Battery {next_letter} - cells 1 to 7",
+        "battery": next_letter,
+        "cell_start": 1,
+        "cell_end": 7,
+        "session_type": "production",
+        "explanation": f"Begin a new pack. Letter {next_letter} is the next available.",
+    })
+
+    # Always offer testing
+    suggestions.append({
+        "kind": "testing",
+        "label": "Testing / set-aside (not part of any pack)",
+        "battery": "TEST",
+        "cell_start": 1,
+        "cell_end": 7,
+        "session_type": "testing",
+        "explanation": "Use for module sanity-checks, retests, or experimental work. Won't be eligible for pack-building.",
+    })
+
+    return jsonify({
+        "battery_progress": {b: sorted(c) for b, c in battery_progress.items()},
+        "suggestions": suggestions,
+    })
+
+
 @app.post("/api/sessions/<session_key>/label")
 def api_label_session(session_key):
     data = request.get_json(force=True)
@@ -156,24 +250,29 @@ def api_label_session(session_key):
     cell_end = int(data.get("cell_end"))
     skip = data.get("skip_channels") or [3]
     notes = data.get("notes") or ""
+    session_type = data.get("session_type", "production")
+    if session_type not in ("production", "testing"):
+        return jsonify({"error": "session_type must be 'production' or 'testing'"}), 400
 
-    if not battery or not battery.isalpha():
-        return jsonify({"error": "battery must be a letter A-Z"}), 400
-    if cell_start < 1 or cell_end > 28 or cell_end < cell_start:
+    if not battery:
+        return jsonify({"error": "battery letter required"}), 400
+    if session_type == "production" and not battery.isalpha():
+        return jsonify({"error": "production battery must be a letter A-Z"}), 400
+    if session_type == "production" and (cell_start < 1 or cell_end > 28 or cell_end < cell_start):
         return jsonify({"error": "cell range must be within 1-28 and ascending"}), 400
 
-    # Validate cell-range count matches the active channel count
     sessions = {s["session_key"]: s for s in db.scan_sessions()}
     if session_key not in sessions:
         return jsonify({"error": f"session {session_key} not found"}), 404
     active_channels = [c for c in sessions[session_key]["channels"] if c not in skip]
     n_cells = cell_end - cell_start + 1
-    if n_cells != len(active_channels):
+    # Validate cell-range count for production only — testing is freeform
+    if session_type == "production" and n_cells != len(active_channels):
         return jsonify({"error":
             f"cell range covers {n_cells} cells but {len(active_channels)} channels are active "
             f"({active_channels}). Either widen the range or add channels to skip list."}), 400
 
-    db.save_session_label(session_key, battery, cell_start, cell_end, skip, notes)
+    db.save_session_label(session_key, battery, cell_start, cell_end, skip, notes, session_type)
     return jsonify({"ok": True})
 
 

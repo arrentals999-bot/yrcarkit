@@ -331,6 +331,38 @@ button { cursor: pointer; font: inherit; }
 /* checkbox in pool */
 .pool-checkbox { cursor: pointer; transform: scale(1.2); }
 
+/* TEST badge for set-aside / testing modules */
+.cell-tag.test {
+  background: #fef3c7;
+  color: #92400e;
+  border: 1px solid #f59e0b;
+}
+
+/* Categorize modal — option cards */
+.categorize-option {
+  display: block;
+  width: 100%;
+  background: var(--card);
+  border: 2px solid var(--border);
+  border-radius: 6px;
+  padding: 14px 16px;
+  margin-bottom: 8px;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  transition: border-color .15s, background .15s;
+}
+.categorize-option:hover { border-color: var(--primary); background: #eef2ff; }
+.categorize-option .cat-headline {
+  font-weight: 600; font-size: 14px; color: var(--text);
+}
+.categorize-option .cat-explain {
+  font-size: 12px; color: var(--muted); margin-top: 4px;
+}
+.categorize-option.continue   { border-left: 4px solid var(--success); }
+.categorize-option.new-battery { border-left: 4px solid var(--primary); }
+.categorize-option.testing    { border-left: 4px solid var(--warn); }
+
 /* battery/cell tag in pool */
 .cell-tag {
   display: inline-block;

@@ -86,6 +86,8 @@ def _eligible_with_rejects(modules, thresholds):
             reasons.append(f"status={m.get('status')}")
         if require_labelled and not (m.get("battery") and m.get("cell_position")):
             reasons.append("unlabelled (no battery/cell — can't trust identity)")
+        if m.get("session_type") == "testing":
+            reasons.append("testing/set-aside session (not for pack-building)")
         if m.get("cap_ah") is None:
             reasons.append("no cap data")
         elif m["cap_ah"] < floor:

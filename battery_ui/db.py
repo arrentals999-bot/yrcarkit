@@ -24,11 +24,12 @@ LOCAL_DB = HERE / "battery_ui.db"
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS session_labels (
     session_key   TEXT PRIMARY KEY,
-    battery       TEXT NOT NULL,        -- 'A', 'B', 'C', ...
-    cell_start    INTEGER NOT NULL,     -- 1, 8, 15, 22
+    battery       TEXT NOT NULL,        -- 'A', 'B', 'C', ... or 'TEST'
+    cell_start    INTEGER NOT NULL,     -- 1, 8, 15, 22 (or 0 for testing)
     cell_end      INTEGER NOT NULL,
     skip_channels TEXT DEFAULT '[3]',   -- JSON list
     notes         TEXT DEFAULT '',
+    session_type  TEXT DEFAULT 'production',  -- 'production' or 'testing'
     labeled_at    TEXT NOT NULL
 );
 
@@ -83,6 +84,9 @@ def get_local_conn():
         conn.execute("ALTER TABLE packs ADD COLUMN pack_name TEXT")
     if "source_summary" not in cols:
         conn.execute("ALTER TABLE packs ADD COLUMN source_summary TEXT DEFAULT ''")
+    sess_cols = {r["name"] for r in conn.execute("PRAGMA table_info(session_labels)").fetchall()}
+    if "session_type" not in sess_cols:
+        conn.execute("ALTER TABLE session_labels ADD COLUMN session_type TEXT DEFAULT 'production'")
     conn.commit()
     return conn
 
@@ -279,23 +283,24 @@ def get_session_label(session_key):
 
 
 def save_session_label(session_key, battery, cell_start, cell_end,
-                       skip_channels=None, notes=""):
+                       skip_channels=None, notes="", session_type="production"):
     if skip_channels is None:
         skip_channels = [3]
     conn = get_local_conn()
     conn.execute("""
         INSERT INTO session_labels (session_key, battery, cell_start, cell_end,
-                                    skip_channels, notes, labeled_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+                                    skip_channels, notes, session_type, labeled_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(session_key) DO UPDATE SET
             battery=excluded.battery,
             cell_start=excluded.cell_start,
             cell_end=excluded.cell_end,
             skip_channels=excluded.skip_channels,
             notes=excluded.notes,
+            session_type=excluded.session_type,
             labeled_at=excluded.labeled_at
     """, (session_key, battery.upper(), cell_start, cell_end,
-          json.dumps(skip_channels), notes, datetime.now().isoformat()))
+          json.dumps(skip_channels), notes, session_type, datetime.now().isoformat()))
     conn.commit()
     conn.close()
 
@@ -490,6 +495,7 @@ def build_module_pool():
                 "battery": battery,
                 "cell_position": cell_pos,
                 "labelled": battery is not None and cell_pos is not None,
+                "session_type": (label.get("session_type") if label else None) or "production",
                 "cap_ah": target["cap_ah"] if target else None,
                 "ir_mohm": target["ir_mohm"] if target else None,
                 "v_end": target["v_end"] if target else None,

@@ -76,9 +76,71 @@ function showUnlabelledBanner(latestSession) {
 function showNewSessionToast(sessionKey) {
   const el = $("#new-session-toast");
   el.innerHTML = `<strong>New session detected:</strong> ${sessionKey}.
-                  <a onclick="switchTab('sessions')">View →</a>`;
+                  <a onclick="openCategorizeModal('${sessionKey}')">Categorize →</a>`;
   el.classList.remove("hidden");
-  setTimeout(() => el.classList.add("hidden"), 8000);
+  setTimeout(() => el.classList.add("hidden"), 12000);
+  // Also open the categorize modal automatically
+  openCategorizeModal(sessionKey);
+}
+
+// ---------- AUTO-CATEGORIZE NEW SESSION ----------
+async function openCategorizeModal(sessionKey) {
+  const info = $("#categorize-session-info");
+  const opts = $("#categorize-options");
+  info.innerHTML = `Loading session info for <strong>${sessionKey}</strong>...`;
+  opts.innerHTML = "";
+  $("#categorize-modal").classList.remove("hidden");
+
+  try {
+    const [det, suggest] = await Promise.all([
+      apiGet(`/api/sessions/${sessionKey}`),
+      apiGet("/api/labelling/suggest-next"),
+    ]);
+
+    info.innerHTML = `
+      <div><strong>${sessionKey}</strong> — started ${det.started || ''}</div>
+      <div style="color: var(--muted); margin-top: 3px;">
+        Channels active: ${(det.channels||[]).filter(c => !c.skipped).map(c => "CH"+c.channel).join(", ")}
+      </div>
+    `;
+
+    const cls = { continue_battery: "continue", new_battery: "new-battery", testing: "testing" };
+    opts.innerHTML = (suggest.suggestions || []).map(s => `
+      <button class="categorize-option ${cls[s.kind]}" onclick='applyCategorize(${JSON.stringify(sessionKey)}, ${JSON.stringify(s).replace(/'/g, "&apos;")})'>
+        <div class="cat-headline">${escapeHtml(s.label)}</div>
+        <div class="cat-explain">${escapeHtml(s.explanation)}</div>
+      </button>
+    `).join("");
+  } catch (e) {
+    info.innerHTML = `<span style="color: var(--danger)">Failed to load: ${e}</span>`;
+  }
+}
+
+async function applyCategorize(sessionKey, suggestion) {
+  // For testing sessions, label is freeform; for production, use the suggested cells
+  const body = {
+    battery: suggestion.battery,
+    cell_start: suggestion.cell_start,
+    cell_end: suggestion.cell_end,
+    skip_channels: [3],
+    session_type: suggestion.session_type,
+    notes: suggestion.kind === "testing" ? "Auto-tagged as testing/set-aside" : "",
+  };
+  const r = await apiPost(`/api/sessions/${sessionKey}/label`, body);
+  if (r.error) {
+    // For testing sessions, the channel-count check fails but that's OK — ignore and re-send
+    if (suggestion.session_type === "testing") {
+      // server already validated session_type=='testing' loosens the check. If still failing, surface error.
+      alert("Save failed: " + r.error);
+      return;
+    }
+    alert("Save failed: " + r.error);
+    return;
+  }
+  closeModal("categorize-modal");
+  // Refresh whatever tab is open
+  const active = $(".tab.active").dataset.tab;
+  switchTab(active);
 }
 
 // ---------- AUTO-POLL (adaptive: 10s when live, 30s when idle) ----------
@@ -579,9 +641,14 @@ function renderPool() {
         ${rows.map(m => {
           const k = refKey(m);
           const checked = _bulkSelection.has(k) ? "checked" : "";
-          const tag = m.battery
-            ? `<span class="cell-tag">${m.battery}-${m.cell_position ?? '?'}</span> <button class="tiny-edit" title="edit label" onclick="editPoolLabel('${m.session_key}', ${m.channel}, '${m.battery}', ${m.cell_position||0})">✎</button>`
-            : `<span class="cell-tag unlab">unlabelled</span> <button class="tiny-edit" title="set label" onclick="editPoolLabel('${m.session_key}', ${m.channel}, '', 0)">✎</button>`;
+          let tag;
+          if (m.session_type === "testing") {
+            tag = `<span class="cell-tag test" title="Testing/set-aside session — not for pack-building">${m.battery || 'TEST'}-${m.cell_position ?? '?'} (TEST)</span> <button class="tiny-edit" title="edit label" onclick="editPoolLabel('${m.session_key}', ${m.channel}, '${m.battery||''}', ${m.cell_position||0})">✎</button>`;
+          } else if (m.battery) {
+            tag = `<span class="cell-tag">${m.battery}-${m.cell_position ?? '?'}</span> <button class="tiny-edit" title="edit label" onclick="editPoolLabel('${m.session_key}', ${m.channel}, '${m.battery}', ${m.cell_position||0})">✎</button>`;
+          } else {
+            tag = `<span class="cell-tag unlab">unlabelled</span> <button class="tiny-edit" title="set label" onclick="editPoolLabel('${m.session_key}', ${m.channel}, '', 0)">✎</button>`;
+          }
           return `
           <tr>
             <td><input type="checkbox" class="pool-checkbox" data-ref="${k}" ${checked} onclick="bulkToggle('${k}', this.checked)"></td>
