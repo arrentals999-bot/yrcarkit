@@ -105,15 +105,44 @@ async function openCategorizeModal(sessionKey) {
     `;
 
     const cls = { continue_battery: "continue", new_battery: "new-battery", testing: "testing" };
-    opts.innerHTML = (suggest.suggestions || []).map(s => `
+    const used = Object.keys(suggest.battery_progress || {}).filter(b => b !== "TEST").sort();
+    let html = (suggest.suggestions || []).map(s => `
       <button class="categorize-option ${cls[s.kind]}" onclick='applyCategorize(${JSON.stringify(sessionKey)}, ${JSON.stringify(s).replace(/'/g, "&apos;")})'>
         <div class="cat-headline">${escapeHtml(s.label)}</div>
         <div class="cat-explain">${escapeHtml(s.explanation)}</div>
       </button>
     `).join("");
+    // Always include a "specific letter" option for picking any other battery
+    html += `
+      <div class="categorize-option new-battery" style="cursor: default;">
+        <div class="cat-headline" style="display:flex; align-items:center; gap:8px; flex-wrap: wrap;">
+          <span>Start a specific battery:</span>
+          <input type="text" id="custom-battery-letter" maxlength="2" style="width:50px; padding:4px 8px; text-transform:uppercase; font-size:14px; font-weight:600;" placeholder="?">
+          <span>cells</span>
+          <input type="number" id="custom-cell-start" min="1" max="28" value="1" style="width:55px; padding:4px 8px; font-size:14px;">
+          <span>-</span>
+          <input type="number" id="custom-cell-end" min="1" max="28" value="7" style="width:55px; padding:4px 8px; font-size:14px;">
+          <button class="btn-primary" style="padding: 4px 12px; font-size: 13px;" onclick="applyCustomLetter('${sessionKey}')">Apply</button>
+        </div>
+        <div class="cat-explain">Use any letter (D, M, etc.) when starting a different physical pack. Already used: ${used.length ? used.join(", ") : "none"}.</div>
+      </div>`;
+    opts.innerHTML = html;
   } catch (e) {
     info.innerHTML = `<span style="color: var(--danger)">Failed to load: ${e}</span>`;
   }
+}
+
+async function applyCustomLetter(sessionKey) {
+  const letter = ($("#custom-battery-letter").value || "").trim().toUpperCase();
+  const cs = parseInt($("#custom-cell-start").value);
+  const ce = parseInt($("#custom-cell-end").value);
+  if (!letter || !letter.match(/^[A-Z]+$/)) { alert("Enter a letter (A-Z)"); return; }
+  if (!cs || !ce || ce < cs || cs < 1 || ce > 28) { alert("Cell range must be 1-28 ascending"); return; }
+  await applyCategorize(sessionKey, {
+    kind: "new_battery", battery: letter,
+    cell_start: cs, cell_end: ce,
+    session_type: "production",
+  });
 }
 
 async function applyCategorize(sessionKey, suggestion) {
