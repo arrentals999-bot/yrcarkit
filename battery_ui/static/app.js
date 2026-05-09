@@ -30,6 +30,24 @@ function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);
 }
 
+// ---------- TREND BADGE WITH HOVER TOOLTIP ----------
+// Hover any trend badge to see what it actually means in plain English.
+
+const TREND_TIPS = {
+  IMPROVING: "Cap rose by 5%+ across cycles — reconditioning worked. Module had memory effect, the cycles broke it down. Keep it, the number is real.",
+  STABLE:    "Flat across cycles (within +/-5%) — module is already at its ceiling. This is the true cap, no benefit from more cycles.",
+  PLATEAU:   "Peaked early (cycle 2-3), then mild fade. Done conditioning. Use the number — but don't run MORE cycles, you'll just lose cap.",
+  DECLINING: "Peaked then fell by more than 8%. Over-cycled or end-of-life. Either accept the lower number, or retest with fewer cycles to recover.",
+  DEAD:      "Peak cap below 0.3 Ah. Failed module — internal short, dried electrolyte, etc. Scrap it.",
+  UNKNOWN:   "Not enough cycle data to classify yet (need 2+ completed discharges).",
+};
+
+function trendBadge(trend, opts = {}) {
+  const tip = TREND_TIPS[trend] || "";
+  const sz  = opts.small ? ' style="font-size:10px"' : '';
+  return `<span class="badge ${trend}" data-tip="${escapeHtml(tip)}"${sz}>${trend}</span>`;
+}
+
 // ---------- BANNERS ----------
 function dismissBanner(elId, storeKey) {
   $("#" + elId).classList.add("hidden");
@@ -233,7 +251,7 @@ async function loadDashboard() {
     _lastSessionKey = d.latest_session ? d.latest_session.session_key : null;
     showUnlabelledBanner(d.latest_session ? {...d.latest_session, label: d.latest_label} : null);
 
-    const trendCounts = Object.entries(d.by_trend || {}).map(([k,v]) => `<span class="badge ${k}">${k} ${v}</span>`).join(" ");
+    const trendCounts = Object.entries(d.by_trend || {}).map(([k,v]) => `<span class="badge ${k}" data-tip="${escapeHtml(TREND_TIPS[k] || '')}">${k} ${v}</span>`).join(" ");
     const statusCounts = Object.entries(d.by_status || {}).map(([k,v]) => `<span class="status-pill ${k}">${k}: ${v}</span>`).join(" ");
 
     let latestHtml = "";
@@ -293,7 +311,7 @@ async function loadSessions() {
         ? `Battery <strong>${s.label.battery}</strong>, cells ${s.label.cell_start}–${s.label.cell_end}`
         : `<em style="color: var(--danger);">unlabelled</em>`;
       const trendBadges = Object.entries(s.trend_dist || {})
-        .map(([k,v]) => `<span class="badge ${k}" style="font-size:10px">${k} ${v}</span>`)
+        .map(([k,v]) => `<span class="badge ${k}" data-tip="${escapeHtml(TREND_TIPS[k] || '')}" style="font-size:10px">${k} ${v}</span>`)
         .join(" ");
       const capRange = s.cap_range
         ? `<span style="color: var(--muted); margin-left: 12px;">cap ${fmt(s.cap_range[0])}–${fmt(s.cap_range[1])} Ah</span>`
@@ -332,7 +350,7 @@ async function openLabelModal(sessionKey) {
     const skipSet = new Set((f.skip_channels.value || "").split(/[,\s]+/).map(s => parseInt(s)).filter(Boolean));
     const rows = det.channels.map(ch => {
       const skipped = skipSet.has(ch.channel);
-      const trend = `<span class="badge ${ch.trend}">${ch.trend}</span>`;
+      const trend = trendBadge(ch.trend);
       return `<div class="ch-row">
         <span class="ch-name">CH${ch.channel}</span>
         ${ skipped ? '<span style="color: var(--muted)">(skipped)</span>' :
@@ -416,7 +434,7 @@ async function openModuleDetail(sessionKey, channel) {
               <span>IR <strong>${fmt(h.ir_mohm,1)} mΩ</strong></span>
               <span>Vend ${fmt(h.v_end,3)} V</span>
               <span>${h.n_discharges}D</span>
-              <span class="badge ${h.trend}" style="font-size: 10px;">${h.trend}</span>
+              ${trendBadge(h.trend, {small: true})}
               <button class="btn-cancel" style="padding: 3px 8px; font-size: 11px; margin-left: auto;" onclick="openModuleDetail('${h.session_key}', ${h.channel})">view</button>
             </div>
           `).join("")}
@@ -443,7 +461,7 @@ async function openModuleDetail(sessionKey, channel) {
           <div class="meta-item"><div class="lbl">Total cycle time</div><div class="val">${totalH}h ${totalM}m</div></div>
         </div>
         <p style="margin-top: 10px; font-size: 13px;">
-          <span class="badge ${d.trend}">${d.trend}</span>
+          ${trendBadge(d.trend)}
           <span style="color: var(--muted); margin-left: 8px;">${d.trend_desc}</span>
         </p>
         <p style="margin-top: 8px; font-size: 13px;">
@@ -555,7 +573,7 @@ function renderPool() {
             <td>${fmt(m.cap_ah)}</td>
             <td>${fmt(m.ir_mohm, 1)}</td>
             <td>${fmt(m.v_end, 3)}</td>
-            <td><span class="badge ${m.trend}">${m.trend}</span></td>
+            <td>${trendBadge(m.trend)}</td>
             <td><span class="cap-series" title="discharge caps each cycle — click for full detail" style="cursor:pointer" onclick="openModuleDetail('${m.session_key}', ${m.channel})">${(m.discharge_caps || []).map(c=>c.toFixed(2)).join('→')}</span></td>
             <td>
               <select class="status-edit" data-sk="${m.session_key}" data-ch="${m.channel}">
@@ -805,7 +823,7 @@ function renderPackResult(pack) {
 function moduleCell(m) {
   if (!m) return "<em>—</em>";
   const tag = m.battery ? `${m.battery}-${m.cell_position}` : `(${m.session_key} CH${m.channel})`;
-  return `<strong>${tag}</strong> <span style="color:var(--muted)">${fmt(m.cap_ah)}Ah ${fmt(m.ir_mohm,1)}mΩ</span> <span class="badge ${m.trend}" style="font-size:10px">${m.trend}</span>`;
+  return `<strong>${tag}</strong> <span style="color:var(--muted)">${fmt(m.cap_ah)}Ah ${fmt(m.ir_mohm,1)}mΩ</span> ${trendBadge(m.trend, {small: true})}`;
 }
 
 function summarizeCandidates(s) {

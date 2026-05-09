@@ -278,8 +278,13 @@ for sym in ("openModuleDetail", "editPoolLabel", "bulkSetStatus",
             "renderStrategyCompare", "showCutoffReminder", "showUnlabelledBanner",
             "pollForUpdates", "cell-tag",
             "renamePack", "viewPackBlocks", "pack_name", "source_summary",
-            "loadLive", "live-card", "live-dot"):
+            "loadLive", "live-card", "live-dot",
+            "TREND_TIPS", "trendBadge", "data-tip"):
     check(f"app.js contains {sym!r}", sym in js)
+# Confirm tooltip text actually shipped
+check("IMPROVING tooltip text shipped", "reconditioning worked" in js)
+check("PLATEAU tooltip text shipped",   "Done conditioning" in js)
+check("DEAD tooltip text shipped",      "Failed module" in js)
 
 check("Build form has pack_name input", 'name="pack_name"' in html)
 check("HTML rebrand to Ratan's", "Ratan" in html)

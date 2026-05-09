@@ -102,6 +102,40 @@ tbody tr:hover { background: #f8f9fb; }
 .badge.DEAD       { background: var(--trend-DEAD); }
 .badge.UNKNOWN    { background: var(--trend-UNKNOWN); }
 
+/* Hover tooltip on badges (data-tip attribute set by trendBadge() in JS) */
+.badge[data-tip] { position: relative; cursor: help; }
+.badge[data-tip]:hover::after {
+  content: attr(data-tip);
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: #1f2937;
+  color: white;
+  padding: 8px 12px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: normal;
+  text-transform: none;
+  letter-spacing: normal;
+  white-space: normal;
+  width: 280px;
+  z-index: 200;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+  pointer-events: none;
+  line-height: 1.4;
+}
+.badge[data-tip]:hover::before {
+  content: "";
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 5px solid transparent;
+  border-top-color: #1f2937;
+  z-index: 201;
+}
+
 .status-pill {
   display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 500;
   background: #e5e7eb; color: var(--text);
