@@ -18,6 +18,7 @@ DEFAULT_THRESHOLDS = {
     "ir_ceiling_module":    25.0,  # mΩ DC, per-module
     "max_pack_cap_spread":  0.5,   # Ah  — block-pair averages must be tighter than this
     "max_pack_ir_spread":   5.0,   # mΩ
+    "require_labelled":     1.0,   # >0 = require battery+cell label; 0 = allow unlabelled
 }
 
 
@@ -77,11 +78,14 @@ def _eligible_with_rejects(modules, thresholds):
     """Same as _eligible but also returns rejected modules with reasons."""
     floor = thresholds["cap_floor_reuse"]
     ceil  = thresholds["ir_ceiling_module"]
+    require_labelled = thresholds.get("require_labelled", 1.0) > 0
     eligible, rejected = [], []
     for m in modules:
         reasons = []
         if m.get("status") != "available":
             reasons.append(f"status={m.get('status')}")
+        if require_labelled and not (m.get("battery") and m.get("cell_position")):
+            reasons.append("unlabelled (no battery/cell — can't trust identity)")
         if m.get("cap_ah") is None:
             reasons.append("no cap data")
         elif m["cap_ah"] < floor:

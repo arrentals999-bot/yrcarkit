@@ -613,8 +613,17 @@ def api_dashboard():
     latest_session = sessions[-1] if sessions else None
     latest_label = db.get_session_label(latest_session["session_key"]) if latest_session else None
 
+    labelled = sum(1 for m in pool if m.get("battery") and m.get("cell_position"))
+    by_battery = {}
+    for m in pool:
+        if m.get("battery"):
+            by_battery[m["battery"]] = by_battery.get(m["battery"], 0) + 1
+
     return jsonify({
         "total_modules":    len(pool),
+        "labelled_modules": labelled,
+        "unlabelled_modules": len(pool) - labelled,
+        "by_battery":       by_battery,
         "by_status":        by_status,
         "by_trend":         by_trend,
         "session_count":    len(sessions),

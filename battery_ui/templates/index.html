@@ -89,6 +89,7 @@
   <section id="tab-pool" class="tab-pane">
     <h2>Module Pool — every module ever tested</h2>
     <div class="filters">
+      <label><input type="checkbox" id="filter-hide-unlabelled" checked> Hide unlabelled (legacy/junk)</label>
       <label>Battery: <select id="filter-battery"><option value="">any</option></select></label>
       <label>Status: <select id="filter-status">
         <option value="">any</option>
@@ -129,7 +130,8 @@
           <option value="ANY">any (use whole pool)</option>
         </select>
       </label>
-      <label><input type="checkbox" name="allow_borrow" checked> Allow borrowing from other batteries</label>
+      <label><input type="checkbox" name="allow_borrow" checked> Allow borrowing from other labelled batteries</label>
+      <label><input type="checkbox" name="allow_unlabelled"> <strong>Include unlabelled (legacy) modules</strong> — risky, you don't know which physical module each was</label>
       <label>Strategy:
         <select name="strategy">
           <option value="pair_opposites" selected>Pair-opposites (recommended for daily-driver)</option>

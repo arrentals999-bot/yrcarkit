@@ -273,9 +273,20 @@ async function loadDashboard() {
     // also load the live panel above the cards
     loadLive();
 
+    const byBatList = Object.entries(d.by_battery || {}).sort()
+      .map(([b,n]) => `<span class="cell-tag" style="margin-right:6px">${b}: ${n}</span>`).join("");
     el.innerHTML = `
       ${latestHtml}
-      <div class="card"><div class="label">Total modules tested</div><div class="value">${d.total_modules}</div></div>
+      <div class="card">
+        <div class="label">Labelled modules <span class="tooltip" data-tip="Modules tagged with a battery letter and cell number — these are usable for pack-building. Unlabelled ones (legacy/junk) are hidden from default views.">ⓘ</span></div>
+        <div class="value">${d.labelled_modules || 0}</div>
+        <div class="sub">${byBatList || 'no batteries labelled yet'}</div>
+      </div>
+      <div class="card">
+        <div class="label">Unlabelled (hidden by default)</div>
+        <div class="value" style="color: var(--muted);">${d.unlabelled_modules || 0}</div>
+        <div class="sub">legacy data — hidden from Pool & Build by default</div>
+      </div>
       <div class="card"><div class="label">Sessions</div><div class="value">${d.session_count}</div></div>
       <div class="card"><div class="label">Packs built</div><div class="value">${d.pack_count}</div></div>
       <div id="cloud-card" class="card" style="grid-column: span 2;">
@@ -530,6 +541,7 @@ async function loadPool() {
 $("#filter-battery").addEventListener("change", renderPool);
 $("#filter-status").addEventListener("change", renderPool);
 $("#filter-trend").addEventListener("change", renderPool);
+$("#filter-hide-unlabelled").addEventListener("change", renderPool);
 
 function refKey(m) { return `${m.session_key}|${m.channel}`; }
 
@@ -537,13 +549,18 @@ function renderPool() {
   const fb = $("#filter-battery").value;
   const fs = $("#filter-status").value;
   const ft = $("#filter-trend").value;
+  const hideUnlabelled = $("#filter-hide-unlabelled").checked;
   let rows = _pool.slice();
+  if (hideUnlabelled) rows = rows.filter(m => m.battery && m.cell_position);
   if (fb) rows = rows.filter(m => m.battery === fb);
   if (fs) rows = rows.filter(m => m.status === fs);
   if (ft) rows = rows.filter(m => m.trend === ft);
   rows.sort((a,b) => (b.cap_ah || 0) - (a.cap_ah || 0));
 
-  $("#pool-count").textContent = `${rows.length} of ${_pool.length} modules`;
+  const hiddenCount = _pool.length - rows.length;
+  $("#pool-count").textContent = hiddenCount > 0
+    ? `${rows.length} shown · ${hiddenCount} hidden by filters`
+    : `${rows.length} of ${_pool.length} modules`;
   updateBulkBar();
 
   const html = `
@@ -698,6 +715,7 @@ function readBuildForm() {
     ir_ceiling_module: parseFloat(f.ir_ceiling_module.value),
     max_pack_cap_spread: parseFloat(f.max_pack_cap_spread.value),
     max_pack_ir_spread:  parseFloat(f.max_pack_ir_spread.value),
+    require_labelled:    f.allow_unlabelled.checked ? 0 : 1,  // checkbox flips the flag
     pack_name:         f.pack_name.value.trim(),
     destination:       f.destination.value,
   };
