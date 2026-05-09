@@ -59,6 +59,36 @@ function showCutoffReminder() {
   $("#cutoff-banner").classList.remove("hidden");
 }
 
+async function renderPendingBanner() {
+  try {
+    const r = await apiGet("/api/labelling/pending");
+    const el = $("#pending-label-banner");
+    if (!r.pending) { el.classList.add("hidden"); return; }
+    const p = r.pending;
+    el.innerHTML = `
+      <span><strong>📌 Pending label queued:</strong> next new session will be auto-labelled as
+      <strong>Battery ${p.battery} cells ${p.cell_start}-${p.cell_end}</strong>
+      ${p.session_type === 'testing' ? '(testing)' : ''}
+      <span style="color: var(--muted); font-size: 11px; margin-left: 8px;">queued ${p.queued_at}</span></span>
+      <button class="banner-dismiss" onclick="cancelPendingLabel()" title="cancel queue">×</button>
+    `;
+    el.classList.remove("hidden");
+  } catch (_) {}
+}
+
+async function cancelPendingLabel() {
+  await apiDel("/api/labelling/pending");
+  $("#pending-label-banner").classList.add("hidden");
+}
+
+async function queuePendingLabel(battery, cell_start, cell_end, session_type) {
+  const r = await apiPost("/api/labelling/pending", {
+    battery, cell_start, cell_end, session_type: session_type || "production",
+  });
+  if (r.ok) renderPendingBanner();
+  else alert("Queue failed: " + (r.error || ""));
+}
+
 function showUnlabelledBanner(latestSession) {
   const el = $("#unlabelled-banner");
   if (!latestSession || latestSession.label) {
@@ -186,6 +216,24 @@ async function pollForUpdates() {
       _lastSessionKey = ls.session_key;
     } else if (ls.session_key !== _lastSessionKey) {
       _lastSessionKey = ls.session_key;
+      // Try to auto-apply a queued pending label first
+      try {
+        const pend = await apiGet("/api/labelling/pending");
+        if (pend.pending) {
+          const r = await apiPost(`/api/labelling/apply-pending/${ls.session_key}`, {});
+          if (r.ok) {
+            const t = $("#new-session-toast");
+            t.innerHTML = `<strong>Auto-labelled new session</strong> as ${r.applied.battery} cells ${r.applied.cell_start}-${r.applied.cell_end}.`;
+            t.classList.remove("hidden");
+            setTimeout(() => t.classList.add("hidden"), 8000);
+            const active = $(".tab.active").dataset.tab;
+            switchTab(active);
+            renderPendingBanner();
+            return;
+          }
+          // pending exists but couldn't apply — fall through to manual modal
+        }
+      } catch(_) {}
       showNewSessionToast(ls.session_key);
       const active = $(".tab.active").dataset.tab;
       switchTab(active);
@@ -1072,4 +1120,5 @@ function refreshAll() {
 
 // ---------- init ----------
 showCutoffReminder();
+renderPendingBanner();
 loadDashboard();

@@ -23,6 +23,7 @@ __pycache__/
 battery_ui/battery_ui.db-journal
 battery_ui/battery_ui.db-wal
 battery_ui/battery_ui.db-shm
+battery_ui/pending_label.json
 
 # Cloudflare tunnel binary (62 MB, downloadable on demand) + secrets + logs
 tunnel/cloudflared.exe

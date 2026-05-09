@@ -148,6 +148,79 @@ def api_session_detail(session_key):
     })
 
 
+PENDING_LABEL_PATH = HERE / "pending_label.json"
+
+
+@app.get("/api/labelling/pending")
+def api_pending_label_get():
+    """Read the queued label that will auto-apply to the next-detected session."""
+    if not PENDING_LABEL_PATH.exists():
+        return jsonify({"pending": None})
+    try:
+        with open(PENDING_LABEL_PATH) as f:
+            return jsonify({"pending": json.load(f)})
+    except Exception as e:
+        return jsonify({"pending": None, "error": str(e)})
+
+
+@app.post("/api/labelling/pending")
+def api_pending_label_set():
+    """Queue a label that will auto-apply to the next new session detected."""
+    data = request.get_json(force=True) or {}
+    battery = (data.get("battery") or "").strip().upper()
+    if not battery:
+        return jsonify({"error": "battery required"}), 400
+    payload = {
+        "battery":      battery,
+        "cell_start":   int(data.get("cell_start", 1)),
+        "cell_end":     int(data.get("cell_end", 7)),
+        "skip_channels": data.get("skip_channels") or [3],
+        "session_type": data.get("session_type", "production"),
+        "notes":        data.get("notes", ""),
+        "queued_at":    __import__("datetime").datetime.now().isoformat(timespec="seconds"),
+    }
+    with open(PENDING_LABEL_PATH, "w") as f:
+        json.dump(payload, f, indent=2)
+    return jsonify({"ok": True, "pending": payload})
+
+
+@app.delete("/api/labelling/pending")
+def api_pending_label_clear():
+    if PENDING_LABEL_PATH.exists():
+        PENDING_LABEL_PATH.unlink()
+    return jsonify({"ok": True})
+
+
+@app.post("/api/labelling/apply-pending/<session_key>")
+def api_apply_pending(session_key):
+    """Apply the queued label to a specific session_key, then clear the queue."""
+    if not PENDING_LABEL_PATH.exists():
+        return jsonify({"error": "no pending label queued"}), 404
+    try:
+        with open(PENDING_LABEL_PATH) as f:
+            p = json.load(f)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+    sessions = {s["session_key"]: s for s in db.scan_sessions()}
+    if session_key not in sessions:
+        return jsonify({"error": f"session {session_key} not found"}), 404
+
+    skip = p["skip_channels"]
+    active = [c for c in sessions[session_key]["channels"] if c not in skip]
+    n_cells = p["cell_end"] - p["cell_start"] + 1
+    if p["session_type"] == "production" and n_cells != len(active):
+        # Cell range doesn't match — leave queue intact, return error so user fixes manually
+        return jsonify({"error":
+            f"queued range covers {n_cells} cells but {len(active)} channels active. "
+            f"Fix the queue or label manually."}), 400
+
+    db.save_session_label(session_key, p["battery"], p["cell_start"], p["cell_end"],
+                           skip, p["notes"], p["session_type"])
+    PENDING_LABEL_PATH.unlink()
+    return jsonify({"ok": True, "applied": p, "session_key": session_key})
+
+
 @app.get("/api/labelling/suggest-next")
 def api_suggest_next_label():
     """When a new YRCARKIT session appears, compute likely-correct labels
