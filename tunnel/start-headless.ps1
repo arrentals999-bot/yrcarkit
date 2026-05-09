@@ -92,7 +92,9 @@ for ($i = 0; $i -lt 45; $i++) {
 }
 
 if ($url) {
-    Set-Content -Path $urlFile -Value $url -Encoding utf8
+    # Write WITHOUT a BOM (Set-Content -Encoding utf8 adds one on Win PS 5,
+    # which makes the file unreadable by curl/wget downstream).
+    [System.IO.File]::WriteAllText($urlFile, $url)
     Log "TUNNEL URL: $url"
 
     # Toast notification visible to user when logged in
