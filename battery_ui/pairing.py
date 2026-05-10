@@ -56,6 +56,46 @@ def classify_trend(discharge_caps):
     return "STABLE"
 
 
+def grade_module(m):
+    """Score a single module A-F based on cap + IR + trend.
+    Returns (letter, short_reason). Used to color-code modules in the Pool."""
+    cap = m.get("cap_ah") or 0
+    ir = m.get("ir_mohm")
+    if ir is None: ir = 999
+    trend = m.get("trend", "UNKNOWN")
+
+    # Hard rejects first
+    if trend == "DEAD" or cap < 1.0:
+        return "F", "DEAD - scrap"
+    if cap < 2.0:
+        return "F", f"cap {cap:.2f} below 2.0 Ah floor"
+    if ir > 35:
+        return "F", f"IR {ir:.1f} too high"
+
+    # A tier — strong candidates
+    if cap >= 4.0 and ir <= 22 and trend not in ("DECLINING",):
+        return "A", "Excellent — pack-grade"
+    # B tier — good
+    if cap >= 3.0 and ir <= 25 and trend not in ("DECLINING", "DEAD"):
+        return "B", "Good — usable"
+    # C tier — acceptable
+    if cap >= 2.5 and ir <= 30:
+        return "C", "Acceptable — use if needed"
+    # D tier — marginal
+    if cap >= 2.0:
+        return "D", "Marginal — last resort"
+    return "F", "Below all thresholds"
+
+
+GRADE_TIPS = {
+    "A": "Excellent — pack-grade module, top choice for any pack",
+    "B": "Good — solid pack candidate, use freely",
+    "C": "Acceptable — use when stronger modules unavailable",
+    "D": "Marginal — last resort, will reduce pack lifespan",
+    "F": "Reject — too weak/IR-high, do not use in pack",
+}
+
+
 TREND_DESCRIPTION = {
     "IMPROVING":  "Cap rose ≥5% across cycles — real reconditioning, this is a healthy module.",
     "STABLE":     "Flat across cycles — already at its ceiling, this is the true number.",
@@ -316,8 +356,15 @@ def build_pack(modules, target_blocks=14, strategy="pair_opposites",
         blocks, err = pair_opposites(modules, target_blocks, th)
     if err:
         # also include rejected modules in the error response so the user can see why
-        _, rejected = _eligible_with_rejects(modules, th)
-        return {"error": err, "rejected_modules": [_strip_module(r) | {"reject_reasons": r["reject_reasons"]} for r in rejected]}
+        eligible_now, rejected = _eligible_with_rejects(modules, th)
+        suggestions = _suggest_threshold_relaxation(modules, target_blocks, th)
+        return {
+            "error": err,
+            "eligible_now": len(eligible_now),
+            "needed": target_blocks * 2,
+            "rejected_modules": [_strip_module(r) | {"reject_reasons": r["reject_reasons"]} for r in rejected],
+            "threshold_suggestions": suggestions,
+        }
 
     if thermal_placement:
         blocks = apply_thermal_placement(blocks)
@@ -367,6 +414,30 @@ def build_pack(modules, target_blocks=14, strategy="pair_opposites",
         "rejected_modules": [_strip_module(r) | {"reject_reasons": r["reject_reasons"]} for r in rejected],
         **grade_info,
     }
+
+
+def _suggest_threshold_relaxation(modules, target_blocks, current_th):
+    """When build fails because too few eligible, try relaxing thresholds
+    progressively and show how many would pass at each level."""
+    needed = target_blocks * 2
+    suggestions = []
+    for cap_floor, ir_ceil, label in [
+        (current_th["cap_floor_reuse"], current_th["ir_ceiling_module"], "current"),
+        (2.5, 30, "moderate (cap >= 2.5, IR <= 30)"),
+        (2.0, 32, "lenient (cap >= 2.0, IR <= 32)"),
+        (1.5, 35, "very lenient (cap >= 1.5, IR <= 35) — quality risk"),
+    ]:
+        th = {**current_th, "cap_floor_reuse": cap_floor, "ir_ceiling_module": ir_ceil}
+        elig, _ = _eligible_with_rejects(modules, th)
+        suggestions.append({
+            "label":       label,
+            "cap_floor":   cap_floor,
+            "ir_ceiling":  ir_ceil,
+            "eligible":    len(elig),
+            "enough":      len(elig) >= needed,
+            "deficit":     max(0, needed - len(elig)),
+        })
+    return suggestions
 
 
 def suggest_swaps(blocks, all_modules, thresholds):

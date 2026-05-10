@@ -680,7 +680,22 @@ async function loadPool() {
 $("#filter-battery").addEventListener("change", renderPool);
 $("#filter-status").addEventListener("change", renderPool);
 $("#filter-trend").addEventListener("change", renderPool);
+$("#filter-grade").addEventListener("change", renderPool);
 $("#filter-hide-unlabelled").addEventListener("change", renderPool);
+
+const GRADE_TIPS = {
+  A: "Excellent — pack-grade module, top choice",
+  B: "Good — solid candidate, use freely",
+  C: "Acceptable — use when stronger modules unavailable",
+  D: "Marginal — last resort, will reduce pack lifespan",
+  F: "Reject — too weak / IR too high, do not use in pack",
+};
+const GRADE_RANK = { A: 5, B: 4, C: 3, D: 2, F: 1 };
+
+function gradeBadge(grade, reason) {
+  const tip = (GRADE_TIPS[grade] || "") + (reason ? "\n\n" + reason : "");
+  return `<span class="module-grade ${grade}" data-tip="${escapeHtml(tip)}">${grade}</span>`;
+}
 
 function refKey(m) { return `${m.session_key}|${m.channel}`; }
 
@@ -688,13 +703,21 @@ function renderPool() {
   const fb = $("#filter-battery").value;
   const fs = $("#filter-status").value;
   const ft = $("#filter-trend").value;
+  const fg = $("#filter-grade").value;
   const hideUnlabelled = $("#filter-hide-unlabelled").checked;
   let rows = _pool.slice();
   if (hideUnlabelled) rows = rows.filter(m => m.battery && m.cell_position);
   if (fb) rows = rows.filter(m => m.battery === fb);
   if (fs) rows = rows.filter(m => m.status === fs);
   if (ft) rows = rows.filter(m => m.trend === ft);
-  rows.sort((a,b) => (b.cap_ah || 0) - (a.cap_ah || 0));
+  if (fg) rows = rows.filter(m => fg.includes(m.quality_grade || ""));
+  // Sort by grade descending (A first), then cap descending within grade
+  rows.sort((a,b) => {
+    const ga = GRADE_RANK[a.quality_grade] || 0;
+    const gb = GRADE_RANK[b.quality_grade] || 0;
+    if (gb !== ga) return gb - ga;
+    return (b.cap_ah || 0) - (a.cap_ah || 0);
+  });
 
   const hiddenCount = _pool.length - rows.length;
   $("#pool-count").textContent = hiddenCount > 0
@@ -706,6 +729,7 @@ function renderPool() {
     <table>
       <thead><tr>
         <th><input type="checkbox" id="select-all-pool" onclick="bulkToggleAll(this.checked)"></th>
+        <th>Grade</th>
         <th>Battery / Cell</th>
         <th>Source</th>
         <th>Cap (Ah)</th><th>IR (mΩ)</th><th>Vend (V)</th>
@@ -729,6 +753,7 @@ function renderPool() {
           return `
           <tr>
             <td><input type="checkbox" class="pool-checkbox" data-ref="${k}" ${checked} onclick="bulkToggle('${k}', this.checked)"></td>
+            <td>${gradeBadge(m.quality_grade, m.quality_reason)}</td>
             <td>${tag}</td>
             <td><span class="detail-link" onclick="openModuleDetail('${m.session_key}', ${m.channel})">${m.session_key} · CH${m.channel}</span></td>
             <td>${fmt(m.cap_ah)}</td>
@@ -919,6 +944,7 @@ function renderPackResult(pack) {
   if (pack.error) {
     let html = `<div class="error-msg">⚠ ${pack.error}</div>`;
     if (pack.candidate_summary) html += summarizeCandidates(pack.candidate_summary);
+    if (pack.threshold_suggestions) html += renderThresholdSuggestions(pack.threshold_suggestions, pack.needed);
     if (pack.rejected_modules?.length) html += renderRejected(pack.rejected_modules);
     $("#build-result").innerHTML = html;
     _previewedPack = null;
@@ -991,6 +1017,29 @@ function moduleCell(m) {
 function summarizeCandidates(s) {
   const byBat = Object.entries(s.by_battery || {}).map(([k,v]) => `${k}: ${v}`).join(" · ");
   return `<p style="color: var(--muted); font-size: 13px;">Candidate pool: ${s.eligible} eligible of ${s.total_modules} total (${byBat || 'none labelled yet'})</p>`;
+}
+
+function renderThresholdSuggestions(suggestions, needed) {
+  const rows = suggestions.map(s => {
+    const cls = s.enough ? "enough" : "";
+    const status = s.enough
+      ? `✓ enough (${s.eligible} ≥ ${needed})`
+      : `${s.eligible} eligible — short by ${s.deficit}`;
+    return `<tr class="${cls}">
+      <td>${escapeHtml(s.label)}</td>
+      <td>cap ≥ ${s.cap_floor}</td>
+      <td>IR ≤ ${s.ir_ceiling}</td>
+      <td>${status}</td>
+    </tr>`;
+  }).join("");
+  return `<div class="threshold-suggestions">
+    <h4>Try lowering thresholds — or test more batteries</h4>
+    <table>
+      <thead><tr><th>Threshold preset</th><th>Cap floor</th><th>IR ceiling</th><th>Result</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    <p style="margin: 6px 0 0; color: var(--muted); font-size: 11px;">Lowering thresholds includes weaker modules (shorter pack life). Better long-term: test more batteries to grow the candidate pool.</p>
+  </div>`;
 }
 
 function renderRejected(rejected) {

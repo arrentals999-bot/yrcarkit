@@ -488,7 +488,7 @@ def build_module_pool():
             cell_pos = override.get("cell_position") or cell_map.get(ch)
             status = override.get("status") or "available"
 
-            pool.append({
+            mod = {
                 "session_key": skey,
                 "session_started": sess["started"],
                 "channel": ch,
@@ -503,5 +503,11 @@ def build_module_pool():
                 "trend": trend,
                 "status": status,
                 "notes": override.get("notes") or "",
-            })
+            }
+            # auto-grade the module so the UI can color-code it
+            from .pairing import grade_module
+            grade, reason = grade_module(mod)
+            mod["quality_grade"] = grade
+            mod["quality_reason"] = reason
+            pool.append(mod)
     return pool

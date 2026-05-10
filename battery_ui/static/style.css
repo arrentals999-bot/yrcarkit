@@ -363,6 +363,34 @@ button { cursor: pointer; font: inherit; }
 .categorize-option.new-battery { border-left: 4px solid var(--primary); }
 .categorize-option.testing    { border-left: 4px solid var(--warn); }
 
+/* per-module quality grade badge in pool */
+.module-grade {
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-weight: 700;
+  font-size: 14px;
+  color: white;
+  min-width: 22px;
+  text-align: center;
+  cursor: help;
+}
+.module-grade.A { background: var(--grade-A); }
+.module-grade.B { background: var(--grade-B); }
+.module-grade.C { background: var(--grade-C); }
+.module-grade.D { background: var(--grade-D); }
+.module-grade.F { background: var(--grade-F); }
+
+/* threshold-suggestion table in build error */
+.threshold-suggestions {
+  margin-top: 12px; background: #eff6ff; border-left: 4px solid var(--primary);
+  border-radius: 4px; padding: 10px 14px; font-size: 13px;
+}
+.threshold-suggestions h4 { margin: 0 0 8px; color: var(--primary-dark); font-size: 13px; }
+.threshold-suggestions table { background: transparent; }
+.threshold-suggestions th, .threshold-suggestions td { padding: 4px 10px; font-size: 12px; }
+.threshold-suggestions tr.enough td { background: #dcfce7; color: #166534; font-weight: 600; }
+
 /* battery/cell tag in pool */
 .cell-tag {
   display: inline-block;
