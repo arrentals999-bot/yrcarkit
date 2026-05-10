@@ -381,6 +381,67 @@ button { cursor: pointer; font: inherit; }
 .module-grade.D { background: var(--grade-D); }
 .module-grade.F { background: var(--grade-F); }
 
+/* per-block pairing verification panel */
+.pairing-verification {
+  margin-top: 18px; background: var(--card); border: 1px solid var(--border);
+  border-radius: 6px; padding: 14px 18px;
+}
+.pairing-verification h3 { margin-top: 0; font-size: 16px; }
+.pairing-verification .pack-summary-bar {
+  display: flex; gap: 14px; margin-bottom: 12px; font-size: 13px;
+}
+.pairing-verification .pack-summary-bar span {
+  padding: 4px 10px; border-radius: 4px; font-weight: 600;
+}
+.block-verify {
+  background: #f9fafb; border-radius: 4px; padding: 10px 14px; margin-bottom: 8px;
+  border-left: 4px solid var(--muted);
+}
+.block-verify.pass { border-left-color: var(--success); }
+.block-verify.warn { border-left-color: var(--warn); }
+.block-verify.fail { border-left-color: var(--danger); }
+.block-verify-head {
+  display: flex; align-items: center; gap: 12px; margin-bottom: 6px;
+  font-weight: 600;
+}
+.block-verify-head .block-num { font-size: 16px; }
+.block-verify-head .block-modules { color: var(--text); }
+.block-verify-head .block-overall {
+  margin-left: auto; padding: 2px 8px; border-radius: 4px; font-size: 12px;
+  text-transform: uppercase; letter-spacing: .3px; color: white;
+}
+.block-verify.pass .block-verify-head .block-overall { background: var(--success); }
+.block-verify.warn .block-verify-head .block-overall { background: var(--warn); }
+.block-verify.fail .block-verify-head .block-overall { background: var(--danger); }
+.check-row {
+  display: flex; gap: 10px; padding: 3px 0; font-size: 12px;
+  align-items: baseline;
+}
+.check-row .check-icon {
+  width: 18px; flex-shrink: 0; font-weight: 700; text-align: center;
+}
+.check-row.pass .check-icon { color: var(--success); }
+.check-row.warn .check-icon { color: var(--warn); }
+.check-row.fail .check-icon { color: var(--danger); }
+.check-row .check-label { font-weight: 600; min-width: 200px; }
+.check-row .check-detail { color: var(--text); flex: 1; }
+.check-row .check-source { color: var(--muted); font-size: 10px; font-style: italic; }
+
+/* pre-install checklist */
+.pre-install-checklist {
+  margin-top: 14px; background: #fffbeb; border-left: 4px solid var(--warn);
+  border-radius: 4px; padding: 12px 16px;
+}
+.pre-install-checklist h4 { margin: 0 0 8px; color: #92400e; font-size: 14px; }
+.pre-install-checklist label {
+  display: flex; align-items: flex-start; gap: 10px; padding: 4px 0;
+  font-size: 13px; cursor: pointer;
+}
+.pre-install-checklist input[type="checkbox"] { margin-top: 3px; transform: scale(1.1); }
+.pre-install-checklist .checklist-source {
+  color: var(--muted); font-size: 10px; font-style: italic; display: block;
+}
+
 /* threshold-suggestion table in build error */
 .threshold-suggestions {
   margin-top: 12px; background: #eff6ff; border-left: 4px solid var(--primary);

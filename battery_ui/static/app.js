@@ -1004,7 +1004,75 @@ function renderPackResult(pack) {
       </tr></thead>
       <tbody>${blocks}</tbody>
     </table>
+    ${ renderPairingVerification(pack) }
+    ${ renderPreInstallChecklist(pack) }
     ${ pack.rejected_modules?.length ? renderRejected(pack.rejected_modules) : '' }
+  `;
+}
+
+function renderPairingVerification(pack) {
+  if (!pack.block_layout) return "";
+  const summary = pack.verification_summary || {};
+  const tag = (m) => m ? (m.battery ? `${m.battery}-${m.cell_position}` : `(CH${m.channel})`) : "—";
+  const ico = { pass: "✓", warn: "!", fail: "✗" };
+
+  const blockCards = pack.block_layout.map(b => {
+    const checks = (b.verifications || []).map(c => `
+      <div class="check-row ${c.status}">
+        <span class="check-icon">${ico[c.status]}</span>
+        <span class="check-label">${escapeHtml(c.label)}</span>
+        <span class="check-detail">${escapeHtml(c.detail)}</span>
+        <span class="check-source">${escapeHtml(c.source)}</span>
+      </div>
+    `).join("");
+    return `
+      <div class="block-verify ${b.verdict}">
+        <div class="block-verify-head">
+          <span class="block-num">Block ${b.block_number}</span>
+          <span class="block-modules">${tag(b.a)} (${fmt(b.a?.cap_ah)} Ah, ${fmt(b.a?.ir_mohm,1)} mΩ) <strong>+</strong> ${tag(b.b)} (${fmt(b.b?.cap_ah)} Ah, ${fmt(b.b?.ir_mohm,1)} mΩ)</span>
+          <span class="block-overall">${b.verdict}</span>
+        </div>
+        ${checks}
+      </div>
+    `;
+  }).join("");
+
+  return `
+    <div class="pairing-verification">
+      <h3>Pairing Verification — every block checked against industry standards</h3>
+      <p style="font-size: 12px; color: var(--muted); margin-top: -6px;">
+        Each pair runs 5 checks: IR delta, IR ceiling, Vend delta, block uniformity (P0A80 prevention), and trend compatibility.
+        Sources: PriusChat #221864/#239581/#151459, Hybrid Automotive Prolong, Dr. Prius app docs, wrouesnel rebuild guide.
+      </p>
+      <div class="pack-summary-bar">
+        <span style="background: #dcfce7; color: #166534;">✓ ${summary.pass_blocks || 0} blocks PASS</span>
+        <span style="background: #fef3c7; color: #92400e;">! ${summary.warn_blocks || 0} blocks WARN</span>
+        <span style="background: #fee2e2; color: #991b1b;">✗ ${summary.fail_blocks || 0} blocks FAIL</span>
+      </div>
+      ${blockCards}
+    </div>
+  `;
+}
+
+function renderPreInstallChecklist(pack) {
+  if (!pack.pre_install_checklist) return "";
+  const items = pack.pre_install_checklist.map((c, idx) => `
+    <label>
+      <input type="checkbox" data-idx="${idx}">
+      <span>
+        ${escapeHtml(c.label)}
+        <span class="checklist-source">${escapeHtml(c.source)}</span>
+      </span>
+    </label>
+  `).join("");
+  return `
+    <div class="pre-install-checklist">
+      <h4>⚠ Pre-Install Checklist — confirm each item BEFORE bolting modules into the pack housing</h4>
+      ${items}
+      <p style="margin: 8px 0 0; font-size: 11px; color: var(--muted);">
+        Industry torque specs: busbar nuts 48 in-lb (5.4 N·m), module bolts 84 in-lb (9.5 N·m). Toyota service spec.
+      </p>
+    </div>
   `;
 }
 

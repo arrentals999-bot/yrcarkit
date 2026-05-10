@@ -56,6 +56,112 @@ def classify_trend(discharge_caps):
     return "STABLE"
 
 
+def verify_pair(a, b, pack_avg_cap):
+    """Run industry-standard per-pair verification checks on a block (pair of modules).
+    Returns list of check dicts with status (pass/warn/fail), label, value, threshold,
+    and source citation. Used to give the user confidence before assembly.
+
+    Checks calibrated from PriusChat threads (151459, 239581, 256955, 221864),
+    Hybrid Automotive Prolong docs, the NREL Thermal Evaluation paper, and the
+    Toyota service manual (P112 Hybrid Battery Control).
+    """
+    checks = []
+    if not a or not b:
+        return [{"status": "fail", "label": "Pair complete", "detail": "Missing module(s) in pair", "source": "—"}]
+
+    cap_a, cap_b = a.get("cap_ah") or 0, b.get("cap_ah") or 0
+    ir_a, ir_b   = a.get("ir_mohm") or 0, b.get("ir_mohm") or 0
+    ven_a, ven_b = a.get("v_end") or 0, b.get("v_end") or 0
+    trend_a, trend_b = a.get("trend"), b.get("trend")
+
+    # 1. IR delta within pair
+    ir_delta = abs(ir_a - ir_b)
+    if ir_delta <= 4:
+        checks.append({"status": "pass", "label": "IR delta (within pair)",
+                       "detail": f"{ir_delta:.1f} mΩ — well-matched (target ≤4)",
+                       "source": "PriusChat #221864"})
+    elif ir_delta <= 8:
+        checks.append({"status": "warn", "label": "IR delta (within pair)",
+                       "detail": f"{ir_delta:.1f} mΩ — acceptable but not tight (target ≤4, warn ≤8)",
+                       "source": "PriusChat #221864"})
+    else:
+        checks.append({"status": "fail", "label": "IR delta (within pair)",
+                       "detail": f"{ir_delta:.1f} mΩ — concerning (>8 mΩ — different load behavior)",
+                       "source": "PriusChat #221864"})
+
+    # 2. IR absolute ceiling per module
+    max_ir = max(ir_a, ir_b)
+    if max_ir <= 22:
+        checks.append({"status": "pass", "label": "IR absolute (each module)",
+                       "detail": f"max {max_ir:.1f} mΩ — both healthy (Dr. Prius warn at 30)",
+                       "source": "Dr. Prius app docs"})
+    elif max_ir <= 25:
+        checks.append({"status": "warn", "label": "IR absolute (each module)",
+                       "detail": f"max {max_ir:.1f} mΩ — borderline; one module is degrading",
+                       "source": "Dr. Prius app docs"})
+    else:
+        checks.append({"status": "fail", "label": "IR absolute (each module)",
+                       "detail": f"max {max_ir:.1f} mΩ — exceeds healthy ceiling (Dr. Prius warns at 30)",
+                       "source": "Dr. Prius app docs"})
+
+    # 3. End-of-discharge voltage delta within pair
+    ven_delta = abs(ven_a - ven_b)
+    if ven_delta <= 0.05:
+        checks.append({"status": "pass", "label": "Vend delta (within pair)",
+                       "detail": f"{ven_delta*1000:.0f} mV — tight match",
+                       "source": "wrouesnel rebuild guide"})
+    elif ven_delta <= 0.10:
+        checks.append({"status": "warn", "label": "Vend delta (within pair)",
+                       "detail": f"{ven_delta*1000:.0f} mV — acceptable; modules cycle slightly differently",
+                       "source": "wrouesnel rebuild guide"})
+    else:
+        checks.append({"status": "fail", "label": "Vend delta (within pair)",
+                       "detail": f"{ven_delta*1000:.0f} mV — concern; one module sags faster (target ≤50)",
+                       "source": "wrouesnel rebuild guide"})
+
+    # 4. Block sum within +/-5% of pack mean (THE P0A80 prevention check)
+    block_sum = cap_a + cap_b
+    pack_block_mean = pack_avg_cap * 2
+    pct_diff = abs(block_sum - pack_block_mean) / pack_block_mean * 100 if pack_block_mean else 0
+    if pct_diff <= 3:
+        checks.append({"status": "pass", "label": "Block uniformity (vs pack mean)",
+                       "detail": f"block sum {block_sum:.2f} Ah, {pct_diff:.1f}% off pack mean — excellent",
+                       "source": "PriusChat #239581 (P0A80 prevention)"})
+    elif pct_diff <= 5:
+        checks.append({"status": "pass", "label": "Block uniformity (vs pack mean)",
+                       "detail": f"block sum {block_sum:.2f} Ah, {pct_diff:.1f}% off pack mean — within ±5%",
+                       "source": "PriusChat #239581 (P0A80 prevention)"})
+    elif pct_diff <= 8:
+        checks.append({"status": "warn", "label": "Block uniformity (vs pack mean)",
+                       "detail": f"block sum {block_sum:.2f} Ah, {pct_diff:.1f}% off pack mean (target ≤5%)",
+                       "source": "PriusChat #239581 (P0A80 prevention)"})
+    else:
+        checks.append({"status": "fail", "label": "Block uniformity (vs pack mean)",
+                       "detail": f"block sum {block_sum:.2f} Ah, {pct_diff:.1f}% off pack mean — will trigger P0A80",
+                       "source": "PriusChat #239581 (P0A80 prevention)"})
+
+    # 5. Trend compatibility: avoid pairing DECLINING with healthy
+    if trend_a == "DECLINING" and trend_b == "DECLINING":
+        checks.append({"status": "fail", "label": "Trend compatibility",
+                       "detail": "Both modules DECLINING — block will fail in months",
+                       "source": "PriusChat #151459"})
+    elif "DECLINING" in (trend_a, trend_b):
+        weak = "A" if trend_a == "DECLINING" else "B"
+        checks.append({"status": "warn", "label": "Trend compatibility",
+                       "detail": f"Module {weak} is DECLINING — pair will degrade fast; flag for retest in 30 days",
+                       "source": "PriusChat #151459"})
+    elif trend_a in ("DEAD", "UNKNOWN") or trend_b in ("DEAD", "UNKNOWN"):
+        checks.append({"status": "fail", "label": "Trend compatibility",
+                       "detail": "One module DEAD/UNKNOWN — re-test or replace before assembly",
+                       "source": "PriusChat #151459"})
+    else:
+        checks.append({"status": "pass", "label": "Trend compatibility",
+                       "detail": f"both {trend_a}/{trend_b} — healthy pair",
+                       "source": "PriusChat #151459"})
+
+    return checks
+
+
 def grade_module(m):
     """Score a single module A-F based on cap + IR + trend.
     Returns (letter, short_reason). Used to color-code modules in the Pool."""
@@ -372,16 +478,36 @@ def build_pack(modules, target_blocks=14, strategy="pair_opposites",
     grade_info = grade_pack(blocks)
     swap_suggestions = suggest_swaps(blocks, modules, th)
 
-    # normalize block_layout to JSON-safe dicts
+    # Compute pack avg cap for block-uniformity checks
+    all_caps = []
+    for b in blocks:
+        for pos in ("a", "b"):
+            m = b.get(pos)
+            if m and m.get("cap_ah") is not None:
+                all_caps.append(m["cap_ah"])
+    pack_avg_cap = sum(all_caps) / len(all_caps) if all_caps else 0
+
+    # normalize block_layout to JSON-safe dicts AND run per-block verification
     layout = []
     for b in blocks:
+        a_full, b_full = b.get("a"), b.get("b")
+        verifications = verify_pair(a_full, b_full, pack_avg_cap)
+        # block-level overall verdict
+        if any(v["status"] == "fail" for v in verifications):
+            block_verdict = "fail"
+        elif any(v["status"] == "warn" for v in verifications):
+            block_verdict = "warn"
+        else:
+            block_verdict = "pass"
         layout.append({
             "block_number": b["block_number"],
-            "a": _strip_module(b.get("a")),
-            "b": _strip_module(b.get("b")),
+            "a": _strip_module(a_full),
+            "b": _strip_module(b_full),
             "block_cap": b["block_cap"],
             "block_ir":  b["block_ir"],
             "cap_gap":   b["cap_gap"],
+            "verifications": verifications,
+            "verdict":     block_verdict,
         })
 
     # full pool rejection report
@@ -398,6 +524,23 @@ def build_pack(modules, target_blocks=14, strategy="pair_opposites",
     # Sort by count descending so the dominant source comes first
     src_summary = " + ".join(f"{k} ({v})" for k, v in sorted(src_counts.items(), key=lambda x: -x[1]))
 
+    # pack-level verification summary
+    pass_blocks = sum(1 for b in layout if b["verdict"] == "pass")
+    warn_blocks = sum(1 for b in layout if b["verdict"] == "warn")
+    fail_blocks = sum(1 for b in layout if b["verdict"] == "fail")
+    pre_install_checklist = [
+        {"label": "Module rest voltage ≥ 7.7 V each", "ack": False, "source": "Toyota service spec"},
+        {"label": "No corrosion / electrolyte residue at terminals", "ack": False, "source": "Hybrid Battery Repair SD"},
+        {"label": "No case swelling or vent damage", "ack": False, "source": "Toyota service spec"},
+        {"label": "Polarity orientation alternates +/− per pack diagram", "ack": False, "source": "wrouesnel guide"},
+        {"label": "Busbar contact faces clean copper, Noalox applied", "ack": False, "source": "wrouesnel guide"},
+        {"label": "Busbar nuts torqued to 48 in-lb (5.4 N·m) in sequence", "ack": False, "source": "Toyota service torque spec"},
+        {"label": "Module mounting bolts torqued to 84 in-lb (9.5 N·m)", "ack": False, "source": "Toyota service torque spec"},
+        {"label": "Cooling fan and vents cleaned", "ack": False, "source": "Toyota TSB T-SB-0098-12"},
+        {"label": "(Gen 3 only) Battery ECU 'smart unit' inspected for corrosion", "ack": False, "source": "Art's Automotive Gen-3 article"},
+        {"label": "Service plug installed last, after 12 V reconnection", "ack": False, "source": "Toyota repair manual"},
+    ]
+
     pack_id = f"PACK-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
     return {
         "pack_id": pack_id,
@@ -412,6 +555,10 @@ def build_pack(modules, target_blocks=14, strategy="pair_opposites",
         "source_counts": src_counts,
         "swap_suggestions": swap_suggestions,
         "rejected_modules": [_strip_module(r) | {"reject_reasons": r["reject_reasons"]} for r in rejected],
+        "verification_summary": {
+            "pass_blocks": pass_blocks, "warn_blocks": warn_blocks, "fail_blocks": fail_blocks,
+        },
+        "pre_install_checklist": pre_install_checklist,
         **grade_info,
     }
 
