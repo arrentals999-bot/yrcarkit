@@ -142,6 +142,14 @@
       <button class="btn-cancel" onclick="bulkSetStatus('available')">Set available</button>
       <button class="btn-cancel" onclick="bulkClear()">Clear selection</button>
     </div>
+
+    <div class="quick-actions" style="margin-bottom: 12px;">
+      <button class="btn-danger" id="auto-retire-f-btn" onclick="autoRetireGrade('F')">⚫ Auto-retire all F-grade (recycle)</button>
+      <button class="btn-cancel" onclick="autoRetireGrade('D')">Auto-retire all D-grade (set aside)</button>
+      <span style="color: var(--muted); font-size: 12px; margin-left: 10px;">
+        Hides scrap modules from default view. They stay tracked — set status back to 'available' anytime to use them again.
+      </span>
+    </div>
     <div id="pool-table-wrap"><p class="loading">Loading…</p></div>
   </section>
 

@@ -819,6 +819,20 @@ function updateBulkBar() {
   $("#bulk-count").textContent = `${_bulkSelection.size} module(s) selected`;
 }
 
+async function autoRetireGrade(grade) {
+  const targets = _pool.filter(m => m.quality_grade === grade && m.status === "available");
+  if (!targets.length) {
+    alert(`No ${grade}-grade modules currently available to retire.`);
+    return;
+  }
+  const action = grade === "F" ? "RECYCLE (scrap)" : "set aside as backup";
+  if (!confirm(`Mark ${targets.length} ${grade}-grade module(s) as 'retired'?\n\nUse case: ${action}.\n\nThey'll be hidden from the default Pool view and won't appear in Build Pack candidates. You can restore them anytime by changing status back to 'available'.`)) return;
+  const refs = targets.map(m => ({ session_key: m.session_key, channel: m.channel }));
+  await apiPost("/api/modules/bulk", { refs, status: "retired" });
+  alert(`${targets.length} ${grade}-grade modules retired. ${grade === "F" ? "Take them to a battery recycler when convenient." : "They're set aside but still in the system."}`);
+  loadPool();
+}
+
 async function bulkSetStatus(status) {
   const refs = Array.from(_bulkSelection).map(k => {
     const [sk, ch] = k.split("|");
