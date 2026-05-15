@@ -394,9 +394,19 @@ async function loadLive() {
       ? `<div class="live-meta" style="margin-top: 4px; color: var(--warn);">⚠ Multiple sessions: ${liveSess.map(s => s.session_key + (s.battery_label ? ` (${s.battery_label} ${s.cell_range})` : '')).join(", ")}</div>`
       : '';
 
-    // Use the new live_channels (all sessions) if available, fall back to legacy channels (latest only)
+    // Group live_channels by session, latest session is the primary
     const allLive = live.live_channels || live.channels || [];
-    const channels = allLive.map(c => {
+    // newest session_key (alphabetical sort works because of YYYYMMDD_HHMM format)
+    const newestKey = live.session_key;
+    const primaryChannels = allLive.filter(c => c.session_key === newestKey);
+    const otherSessions = {};
+    for (const c of allLive) {
+      if (c.session_key !== newestKey) {
+        (otherSessions[c.session_key] ||= []).push(c);
+      }
+    }
+
+    const renderChannelCard = (c) => {
       const stale = c.age_s > 600;     // no update for 10+ min
       const resting = c.is_resting;
       let phaseClass = "charging";
@@ -414,11 +424,6 @@ async function loadLive() {
       const cellTag = c.cell_label
         ? `<span class="cell-tag" style="font-size:11px; padding:2px 8px;">${c.cell_label}</span>`
         : `<span class="cell-tag unlab" style="font-size:11px; padding:2px 8px;">unlabelled</span>`;
-      // Show session_key as a small footnote when there are multiple live sessions
-      const multiSession = (live.live_sessions || []).length > 1;
-      const sessionTag = multiSession && c.session_key
-        ? `<span style="font-size:9px; color: var(--muted); font-family: monospace; display:block; margin-top:3px;">${c.session_key}</span>`
-        : '';
       return `
         <div class="live-ch ${phaseClass}">
           <div class="ch-head">
@@ -426,7 +431,6 @@ async function loadLive() {
             ${cellTag}
             <span class="ch-phase">${phaseLabel}</span>
           </div>
-          ${sessionTag}
           <div class="live-grid">
             <span class="lbl">Cycle</span><span class="val">${c.current_cycle}</span>
             <span class="lbl">Voltage</span><span class="val">${fmt(c.current_vol, 3)} V</span>
@@ -437,7 +441,31 @@ async function loadLive() {
           </div>
           <div class="progress" title="cap accumulated this cycle"><div style="width: ${progressPct}%"></div></div>
         </div>`;
-    }).join("");
+    };
+    const channels = primaryChannels.map(renderChannelCard).join("");
+
+    // Build the additional "ALSO LIVE" cards for any other still-cycling sessions
+    let alsoLiveCards = "";
+    const otherSessKeys = Object.keys(otherSessions).sort().reverse();  // newer first
+    for (const sk of otherSessKeys) {
+      const sm = (live.live_sessions || []).find(s => s.session_key === sk) || {};
+      const otherChannels = otherSessions[sk].map(renderChannelCard).join("");
+      const otherBattTag = sm.battery_label
+        ? `<span class="cell-tag">Battery ${sm.battery_label}${sm.cell_range ? ' cells '+sm.cell_range : ''}</span>`
+        : `<span class="cell-tag unlab">unlabelled</span>`;
+      alsoLiveCards += `
+        <div class="live-card also-live">
+          <div class="live-header">
+            <span class="live-dot" style="background:#3b82f6;"></span>
+            <div>
+              <div class="live-title">⏳ Also live — older session still finishing</div>
+              <div class="live-meta">Session ${sk} · started ${sm.session_started || ''} · ${otherBattTag}</div>
+              <div class="live-meta" style="font-size: 11px; margin-top: 3px;">${otherSessions[sk].length} channel(s) still cycling from this earlier batch</div>
+            </div>
+          </div>
+          <div class="live-channels">${otherChannels}</div>
+        </div>`;
+    }
 
     el.innerHTML = `
       <div class="live-card ${cls}">
@@ -446,16 +474,17 @@ async function loadLive() {
           <div>
             <div class="live-title">${dotTxt}</div>
             <div class="live-meta">Session ${live.session_key} · started ${live.session_started} · ${battTag}</div>
-            ${multiSessionsLine}
+            ${otherSessKeys.length > 0 ? '<div class="live-meta" style="font-size: 11px; margin-top: 3px; color: var(--primary);">⓪ See also-live block below for older session still cycling</div>' : ''}
           </div>
         </div>
-        ${live.channels.length === 0
-          ? `<p style="color: var(--muted)">No channel data yet.</p>`
+        ${primaryChannels.length === 0
+          ? `<p style="color: var(--muted)">No channel data yet for this session.</p>`
           : `<div class="live-channels">${channels}</div>`}
         ${live.is_live
           ? `<p class="live-meta" style="margin-top: 10px;">Refreshing every 10s. Cap-so-far progress bar shown vs 4 Ah baseline.</p>`
           : `<p class="live-meta" style="margin-top: 10px;">No new data in the last 5 min — session likely complete or YRCARKIT idle.</p>`}
-      </div>`;
+      </div>
+      ${alsoLiveCards}`;
     renderPreviousSession(live.previous);
   } catch (e) { /* ignore */ }
 }

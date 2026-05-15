@@ -565,6 +565,11 @@ td.detail-link { color: var(--primary); cursor: pointer; text-decoration: underl
   background: var(--card);
   border: 1px solid var(--border);
 }
+.live-card.also-live {
+  background: linear-gradient(135deg, #eff6ff, #dbeafe);
+  border: 2px solid #3b82f6;
+  margin-top: 12px;
+}
 .live-header {
   display: flex; align-items: center; gap: 10px; margin-bottom: 12px;
 }
