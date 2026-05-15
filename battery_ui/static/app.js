@@ -278,6 +278,40 @@ function startPolling() {
 startPolling();
 
 // ---------- CLOUD STATUS / SYNC NOW ----------
+async function loadRecentSessions() {
+  const el = document.getElementById("recent-sessions-panel");
+  if (!el) return;
+  try {
+    const sessions = await apiGet("/api/sessions");
+    if (!sessions.length) { el.classList.add("hidden"); return; }
+    // skip the latest (already shown in live panel) and take the 5 before that
+    const recent = sessions.slice(-6, -1).reverse();
+    if (!recent.length) { el.classList.add("hidden"); return; }
+    el.classList.remove("hidden");
+    el.innerHTML = `
+      <div class="recent-sessions">
+        <h3>Recent sessions (last 5 before current)</h3>
+        ${recent.map(s => {
+          const lbl = s.label
+            ? `<span class="cell-tag">${s.label.battery}-${s.label.cell_start}..${s.label.cell_end}</span>`
+            : `<span class="cell-tag unlab">unlabelled</span>`;
+          const cap = s.cap_range ? `cap ${fmt(s.cap_range[0])} - ${fmt(s.cap_range[1])} Ah` : '';
+          const trends = Object.entries(s.trend_dist || {})
+            .map(([k,v]) => `<span class="badge ${k}" data-tip="${escapeHtml(TREND_TIPS[k]||'')}" style="font-size:9px">${k} ${v}</span>`)
+            .join(" ");
+          return `<div class="recent-row">
+            <div style="flex:1;">
+              <strong>${s.session_key}</strong> ${lbl}
+              <span style="color: var(--muted); font-size: 11px;">started ${s.started}</span>
+            </div>
+            <div style="font-size: 11px; color: var(--muted);">CH${s.channels.join(",")} · ${cap}</div>
+            <div>${trends}</div>
+          </div>`;
+        }).join("")}
+      </div>`;
+  } catch (e) { /* ignore */ }
+}
+
 async function loadCloudStatus() {
   const el = document.getElementById("cloud-status-content");
   if (!el) return;
@@ -364,10 +398,14 @@ async function loadLive() {
       const ageStr = c.age_s < 60 ? `${c.age_s}s ago` : `${Math.floor(c.age_s/60)}m ago`;
       // typical max cap per Prius cycle ~3-5 Ah; show progress vs 4 Ah baseline
       const progressPct = Math.min(100, ((c.current_cap || 0) / 4.0) * 100);
+      const cellTag = c.cell_label
+        ? `<span class="cell-tag" style="font-size:11px; padding:2px 8px;">${c.cell_label}</span>`
+        : `<span class="cell-tag unlab" style="font-size:11px; padding:2px 8px;">unlabelled</span>`;
       return `
         <div class="live-ch ${phaseClass}">
           <div class="ch-head">
             <span class="ch-num">CH${c.channel}</span>
+            ${cellTag}
             <span class="ch-phase">${phaseLabel}</span>
           </div>
           <div class="live-grid">
@@ -429,8 +467,9 @@ async function loadDashboard() {
         </div>`;
     }
 
-    // also load the live panel above the cards
+    // also load the live panel and recent sessions
     loadLive();
+    loadRecentSessions();
 
     const byBatList = Object.entries(d.by_battery || {}).sort()
       .map(([b,n]) => `<span class="cell-tag" style="margin-right:6px">${b}: ${n}</span>`).join("");

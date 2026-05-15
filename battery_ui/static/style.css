@@ -513,6 +513,20 @@ button { cursor: pointer; font: inherit; }
 .row-clickable:hover { background: #eef2ff !important; }
 td.detail-link { color: var(--primary); cursor: pointer; text-decoration: underline; font-size: 12px; }
 
+/* recent sessions panel (below live, on dashboard) */
+#recent-sessions-panel { margin-bottom: 18px; }
+#recent-sessions-panel.hidden { display: none; }
+.recent-sessions {
+  background: var(--card); border: 1px solid var(--border); border-radius: 6px;
+  padding: 12px 16px;
+}
+.recent-sessions h3 { margin: 0 0 10px; font-size: 14px; color: var(--text); }
+.recent-row {
+  display: flex; align-items: center; gap: 12px; padding: 6px 0;
+  border-bottom: 1px solid #f3f4f6; font-size: 13px;
+}
+.recent-row:last-child { border-bottom: none; }
+
 /* live charging panel */
 #live-panel { margin-bottom: 18px; }
 #live-panel.hidden { display: none; }
@@ -556,9 +570,10 @@ td.detail-link { color: var(--primary); cursor: pointer; text-decoration: underl
 .live-ch.resting    { border-left-color: #94a3b8; opacity: 0.85; }
 .live-ch.stale      { opacity: 0.6; border-left-color: var(--muted); }
 .live-ch .ch-head {
-  display: flex; justify-content: space-between; align-items: baseline;
-  margin-bottom: 6px;
+  display: flex; justify-content: space-between; align-items: center;
+  margin-bottom: 6px; gap: 6px; flex-wrap: wrap;
 }
+.live-ch .ch-head .cell-tag { margin-right: auto; }
 .live-ch .ch-num { font-weight: 700; font-size: 16px; }
 .live-ch .ch-phase {
   font-size: 11px; padding: 2px 8px; border-radius: 10px;

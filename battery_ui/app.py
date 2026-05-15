@@ -740,6 +740,14 @@ def api_live():
         except Exception:
             skip = {3}
 
+    # Compute channel→cell mapping for the live panel
+    cell_map = {}
+    if label:
+        active_chs = sorted([c for c in latest["channels"] if c not in skip])
+        cells = list(range(label["cell_start"], label["cell_end"] + 1))
+        for ch, cid in zip(active_chs, cells):
+            cell_map[ch] = cid
+
     channels_out = []
     most_recent_mtime = 0
     for ch in latest["channels"]:
@@ -751,12 +759,11 @@ def api_live():
             continue
         most_recent_mtime = max(most_recent_mtime, live["file_mtime"])
         age_s = int(time.time() - live["file_mtime"])
-        # human label for cycle position
-        # For 5-cycle session, charge tables = C002,C004,C006,C008,C010 → cycles 1-5
-        # discharge tables = F001,F003,F005,F007,F009 → cycles 1-5
-        cycle_n = (live["current_seq"] + 1) // 2  # rough cycle number
+        cycle_n = (live["current_seq"] + 1) // 2
         channels_out.append({
             "channel":             ch,
+            "cell_label":          (f"{label['battery']}-{cell_map[ch]}" if (label and ch in cell_map) else None),
+            "cell_position":       cell_map.get(ch),
             "current_table":       live["current_table"],
             "current_phase":       live["current_phase"],
             "current_cycle":       cycle_n,
