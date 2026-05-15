@@ -4,6 +4,7 @@ Run with:   python -m battery_ui.app    (from the YRCARKIT folder)
 or          python app.py               (from inside battery_ui/)
 """
 
+import os
 import sys
 import json
 import webbrowser
@@ -722,64 +723,107 @@ def api_sync_now():
 
 @app.get("/api/live")
 def api_live():
-    """Real-time view of the in-progress YRCARKIT session.
-    Returns is_live=True if any DB in the latest session was modified
-    within the last 5 minutes.
+    """Real-time view of ALL currently-cycling channels, regardless of which
+    session each is in. A channel is 'live' if its DB file was modified in
+    the last 5 minutes.
+
+    YRCARKIT can have multiple sessions running at once: e.g. user starts
+    session A with all 7 channels, some channels finish early, user pulls
+    those modules and starts session B with only those channels — so 5
+    channels in session B are running while 2 channels in session A are
+    still finishing. This endpoint shows ALL of them.
     """
     import time
     sessions = db.scan_sessions()
     if not sessions:
-        return jsonify({"is_live": False, "session": None, "channels": []})
+        return jsonify({"is_live": False, "channels": [], "live_sessions": [], "previous": None})
 
-    latest = sessions[-1]
-    label = db.get_session_label(latest["session_key"])
-    skip = {3}
-    if label:
-        try:
-            skip = set(json.loads(label["skip_channels"]))
-        except Exception:
-            skip = {3}
+    now = time.time()
+    LIVE_THRESHOLD_S = 300  # 5 minutes
 
-    # Compute channel→cell mapping for the live panel
-    cell_map = {}
-    if label:
-        active_chs = sorted([c for c in latest["channels"] if c not in skip])
-        cells = list(range(label["cell_start"], label["cell_end"] + 1))
-        for ch, cid in zip(active_chs, cells):
-            cell_map[ch] = cid
+    # For EACH physical channel (1, 2, 4, 5, 6, 7, 8 — skip 3),
+    # find the DB file with the most recent mtime across all sessions.
+    # That tells us which session is currently "owning" that channel.
+    latest_per_channel = {}  # channel -> (mtime, session, fp)
+    for sess in sessions:
+        for ch, fp in sess["channel_paths"].items():
+            try:
+                mtime = os.path.getmtime(fp)
+            except OSError:
+                continue
+            if ch not in latest_per_channel or mtime > latest_per_channel[ch][0]:
+                latest_per_channel[ch] = (mtime, sess, fp)
 
-    channels_out = []
-    most_recent_mtime = 0
-    for ch in latest["channels"]:
-        if ch in skip:
+    # Filter to channels that have written data recently
+    live_channels = []
+    live_session_keys = set()
+    for ch, (mtime, sess, fp) in sorted(latest_per_channel.items()):
+        age_s = int(now - mtime)
+        if age_s > LIVE_THRESHOLD_S:
             continue
-        fp = latest["channel_paths"][ch]
         live = db.read_live_state_for_channel(fp)
         if not live:
             continue
-        most_recent_mtime = max(most_recent_mtime, live["file_mtime"])
-        age_s = int(time.time() - live["file_mtime"])
+        # Look up the session's label to compute cell label for this channel
+        sess_label = db.get_session_label(sess["session_key"])
+        sess_skip = {3}
+        if sess_label:
+            try:
+                sess_skip = set(json.loads(sess_label["skip_channels"]))
+            except Exception:
+                pass
+        cell_position = None
+        cell_label = None
+        if sess_label and ch not in sess_skip:
+            sess_active = sorted([c for c in sess["channels"] if c not in sess_skip])
+            sess_cells = list(range(sess_label["cell_start"], sess_label["cell_end"] + 1))
+            for c, cid in zip(sess_active, sess_cells):
+                if c == ch:
+                    cell_position = cid
+                    cell_label = f"{sess_label['battery']}-{cid}"
+                    break
         cycle_n = (live["current_seq"] + 1) // 2
-        channels_out.append({
+        live_channels.append({
             "channel":             ch,
-            "cell_label":          (f"{label['battery']}-{cell_map[ch]}" if (label and ch in cell_map) else None),
-            "cell_position":       cell_map.get(ch),
+            "session_key":         sess["session_key"],
+            "session_started":     sess["started"],
+            "battery_label":       sess_label["battery"] if sess_label else None,
+            "cell_label":          cell_label,
+            "cell_position":       cell_position,
             "current_table":       live["current_table"],
             "current_phase":       live["current_phase"],
             "current_cycle":       cycle_n,
-            "completed_charge":    live["completed_charge_cycles"],
             "completed_discharge": live["completed_discharge_cycles"],
             "current_vol":         live["current_vol"],
             "current_cur":         live["current_cur"],
             "current_cap":         live["current_cap"],
             "elapsed_in_table_s":  live["elapsed_in_table_s"],
-            "row_count":           live["row_count"],
             "is_resting":          (live.get("current_procedure") in (2, 4) or
                                     (live["current_cur"] is not None and abs(live["current_cur"]) < 0.1)),
             "age_s":               age_s,
         })
+        live_session_keys.add(sess["session_key"])
 
-    is_live = (time.time() - most_recent_mtime) < 300 if most_recent_mtime else False
+    is_live = len(live_channels) > 0
+    # Latest session by start time (used for the panel header / categorize prompt)
+    latest = sessions[-1]
+    label = db.get_session_label(latest["session_key"])
+
+    # Build a list of distinct live sessions for the UI to show as section headers
+    sess_dict = {s["session_key"]: s for s in sessions}
+    live_sessions_meta = []
+    for sk in sorted(live_session_keys):
+        sm = sess_dict.get(sk)
+        sl = db.get_session_label(sk)
+        live_sessions_meta.append({
+            "session_key":     sk,
+            "session_started": sm["started"] if sm else "?",
+            "battery_label":   sl["battery"] if sl else None,
+            "cell_range":      f"{sl['cell_start']}-{sl['cell_end']}" if sl else None,
+        })
+
+    # Keep the original 'channels' field for backward compat (latest session only)
+    channels_out = [c for c in live_channels if c["session_key"] == latest["session_key"]]
 
     # Compute the previous (penultimate) session's per-channel results
     # so the dashboard can show what just finished, without leaving the page.
@@ -840,6 +884,8 @@ def api_live():
         "session_started": latest["started"],
         "battery_label":   label["battery"] if label else None,
         "channels":        channels_out,
+        "live_channels":   live_channels,       # NEW: ALL channels live across all sessions
+        "live_sessions":   live_sessions_meta,  # NEW: list of distinct sessions with live activity
         "previous":        previous,
     })
 

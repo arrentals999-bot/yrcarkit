@@ -378,12 +378,25 @@ async function loadLive() {
     el.classList.remove("hidden");
 
     const cls   = live.is_live ? "" : "idle";
-    const dotTxt = live.is_live ? "LIVE — session in progress" : "Latest session (idle)";
+    const liveSess = live.live_sessions || [];
+    let dotTxt;
+    if (!live.is_live) {
+      dotTxt = "Latest session (idle)";
+    } else if (liveSess.length > 1) {
+      dotTxt = `LIVE — ${liveSess.length} sessions running concurrently`;
+    } else {
+      dotTxt = "LIVE — session in progress";
+    }
     const battTag = live.battery_label
       ? `<span class="cell-tag">Battery ${live.battery_label}</span>`
       : `<span class="cell-tag unlab">unlabelled</span>`;
+    const multiSessionsLine = liveSess.length > 1
+      ? `<div class="live-meta" style="margin-top: 4px; color: var(--warn);">⚠ Multiple sessions: ${liveSess.map(s => s.session_key + (s.battery_label ? ` (${s.battery_label} ${s.cell_range})` : '')).join(", ")}</div>`
+      : '';
 
-    const channels = (live.channels || []).map(c => {
+    // Use the new live_channels (all sessions) if available, fall back to legacy channels (latest only)
+    const allLive = live.live_channels || live.channels || [];
+    const channels = allLive.map(c => {
       const stale = c.age_s > 600;     // no update for 10+ min
       const resting = c.is_resting;
       let phaseClass = "charging";
@@ -401,6 +414,11 @@ async function loadLive() {
       const cellTag = c.cell_label
         ? `<span class="cell-tag" style="font-size:11px; padding:2px 8px;">${c.cell_label}</span>`
         : `<span class="cell-tag unlab" style="font-size:11px; padding:2px 8px;">unlabelled</span>`;
+      // Show session_key as a small footnote when there are multiple live sessions
+      const multiSession = (live.live_sessions || []).length > 1;
+      const sessionTag = multiSession && c.session_key
+        ? `<span style="font-size:9px; color: var(--muted); font-family: monospace; display:block; margin-top:3px;">${c.session_key}</span>`
+        : '';
       return `
         <div class="live-ch ${phaseClass}">
           <div class="ch-head">
@@ -408,6 +426,7 @@ async function loadLive() {
             ${cellTag}
             <span class="ch-phase">${phaseLabel}</span>
           </div>
+          ${sessionTag}
           <div class="live-grid">
             <span class="lbl">Cycle</span><span class="val">${c.current_cycle}</span>
             <span class="lbl">Voltage</span><span class="val">${fmt(c.current_vol, 3)} V</span>
@@ -427,6 +446,7 @@ async function loadLive() {
           <div>
             <div class="live-title">${dotTxt}</div>
             <div class="live-meta">Session ${live.session_key} · started ${live.session_started} · ${battTag}</div>
+            ${multiSessionsLine}
           </div>
         </div>
         ${live.channels.length === 0
