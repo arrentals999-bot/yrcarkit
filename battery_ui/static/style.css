@@ -513,7 +513,31 @@ button { cursor: pointer; font: inherit; }
 .row-clickable:hover { background: #eef2ff !important; }
 td.detail-link { color: var(--primary); cursor: pointer; text-decoration: underline; font-size: 12px; }
 
-/* recent sessions panel (below live, on dashboard) */
+/* previous session panel (between live and recent sessions) */
+#previous-session-panel { margin-bottom: 18px; }
+#previous-session-panel.hidden { display: none; }
+.prev-card {
+  background: var(--card); border: 1px solid var(--border);
+  border-left: 4px solid var(--muted); border-radius: 6px;
+  padding: 14px 18px;
+}
+.prev-header { margin-bottom: 12px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.prev-channels {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(200px,1fr)); gap: 10px;
+}
+.prev-ch {
+  background: white; border-radius: 6px; padding: 10px 12px;
+  border-left: 4px solid var(--border);
+  font-size: 13px; transition: border-color .15s, transform .15s;
+}
+.prev-ch:hover { border-left-color: var(--primary); transform: translateY(-1px); }
+.prev-ch .ch-head { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; flex-wrap: wrap; }
+.prev-ch .ch-head .cell-tag { margin-right: auto; }
+.prev-ch .live-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 4px 10px; font-size: 12px; }
+.prev-ch .live-grid .lbl { color: var(--muted); }
+.prev-ch .live-grid .val { font-weight: 600; text-align: right; font-family: ui-monospace, monospace; }
+
+/* recent sessions panel (below previous, on dashboard) */
 #recent-sessions-panel { margin-bottom: 18px; }
 #recent-sessions-panel.hidden { display: none; }
 .recent-sessions {

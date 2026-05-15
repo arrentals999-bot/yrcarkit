@@ -780,12 +780,67 @@ def api_live():
         })
 
     is_live = (time.time() - most_recent_mtime) < 300 if most_recent_mtime else False
+
+    # Compute the previous (penultimate) session's per-channel results
+    # so the dashboard can show what just finished, without leaving the page.
+    previous = None
+    if len(sessions) >= 2:
+        prev_sess = sessions[-2]
+        prev_label = db.get_session_label(prev_sess["session_key"])
+        prev_skip = {3}
+        if prev_label:
+            try:
+                prev_skip = set(json.loads(prev_label["skip_channels"]))
+            except Exception:
+                pass
+        prev_active = sorted([c for c in prev_sess["channels"] if c not in prev_skip])
+        prev_cell_map = {}
+        if prev_label:
+            cells = list(range(prev_label["cell_start"], prev_label["cell_end"] + 1))
+            for ch, cid in zip(prev_active, cells):
+                prev_cell_map[ch] = cid
+        from .pairing import classify_trend, grade_module
+        prev_channels = []
+        for ch in prev_active:
+            fp = prev_sess["channel_paths"].get(ch)
+            if not fp:
+                continue
+            cycles = db.read_cycles_for_channel(fp)
+            target = db.find_target_discharge(cycles)
+            dis_caps = [c["cap_ah"] for c in cycles if c["kind"] == "F"]
+            trend = classify_trend(dis_caps)
+            mod = {
+                "cap_ah": target["cap_ah"] if target else None,
+                "ir_mohm": target["ir_mohm"] if target else None,
+                "trend": trend,
+            }
+            grade, reason = grade_module(mod)
+            cap_progression = [round(c, 2) for c in dis_caps]
+            prev_channels.append({
+                "channel":       ch,
+                "cell_label":    (f"{prev_label['battery']}-{prev_cell_map[ch]}" if (prev_label and ch in prev_cell_map) else None),
+                "cap_ah":        target["cap_ah"] if target else None,
+                "ir_mohm":       target["ir_mohm"] if target else None,
+                "v_end":         target["v_end"] if target else None,
+                "trend":         trend,
+                "quality_grade": grade,
+                "n_discharges":  len(dis_caps),
+                "cap_progression": cap_progression,
+            })
+        previous = {
+            "session_key":      prev_sess["session_key"],
+            "session_started":  prev_sess["started"],
+            "battery_label":    prev_label["battery"] if prev_label else None,
+            "channels":         prev_channels,
+        }
+
     return jsonify({
         "is_live":         is_live,
         "session_key":     latest["session_key"],
         "session_started": latest["started"],
         "battery_label":   label["battery"] if label else None,
         "channels":        channels_out,
+        "previous":        previous,
     })
 
 

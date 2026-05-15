@@ -436,7 +436,55 @@ async function loadLive() {
           ? `<p class="live-meta" style="margin-top: 10px;">Refreshing every 10s. Cap-so-far progress bar shown vs 4 Ah baseline.</p>`
           : `<p class="live-meta" style="margin-top: 10px;">No new data in the last 5 min — session likely complete or YRCARKIT idle.</p>`}
       </div>`;
+    renderPreviousSession(live.previous);
   } catch (e) { /* ignore */ }
+}
+
+function renderPreviousSession(prev) {
+  const el = document.getElementById("previous-session-panel");
+  if (!el) return;
+  if (!prev || !prev.channels || !prev.channels.length) { el.classList.add("hidden"); return; }
+  el.classList.remove("hidden");
+
+  const battTag = prev.battery_label
+    ? `<span class="cell-tag">Battery ${prev.battery_label}</span>`
+    : `<span class="cell-tag unlab">unlabelled</span>`;
+
+  const channels = prev.channels.map(c => {
+    const cellTag = c.cell_label
+      ? `<span class="cell-tag" style="font-size:11px; padding:2px 8px;">${c.cell_label}</span>`
+      : `<span class="cell-tag unlab" style="font-size:11px; padding:2px 8px;">unlabelled</span>`;
+    const cap = c.cap_ah != null ? fmt(c.cap_ah, 2) : "—";
+    const ir = c.ir_mohm != null ? fmt(c.ir_mohm, 1) : "—";
+    const ven = c.v_end != null ? fmt(c.v_end, 3) : "—";
+    const prog = (c.cap_progression || []).map(p => p.toFixed(2)).join("→");
+    return `
+      <div class="prev-ch" onclick="openModuleDetail('${prev.session_key}', ${c.channel})" style="cursor:pointer">
+        <div class="ch-head">
+          <span class="ch-num">CH${c.channel}</span>
+          ${cellTag}
+          ${gradeBadge(c.quality_grade, '')}
+        </div>
+        <div class="live-grid">
+          <span class="lbl">Settled cap</span><span class="val">${cap} Ah</span>
+          <span class="lbl">IR</span><span class="val">${ir} mΩ</span>
+          <span class="lbl">Vend</span><span class="val">${ven} V</span>
+          <span class="lbl">Trend</span><span class="val">${trendBadge(c.trend, {small: true})}</span>
+        </div>
+        <div style="font-size: 10px; color: var(--muted); margin-top: 4px; font-family: ui-monospace, monospace;">${prog || '(no cycles)'}</div>
+      </div>`;
+  }).join("");
+
+  el.innerHTML = `
+    <div class="prev-card">
+      <div class="prev-header">
+        <strong>Previous session — just finished</strong>
+        <span class="live-meta">${prev.session_key} · started ${prev.session_started} · ${battTag}</span>
+      </div>
+      <div class="prev-channels">${channels}</div>
+      <p class="live-meta" style="margin-top: 8px; font-size: 11px;">Click any card to drill into the full per-cycle history of that module.</p>
+    </div>
+  `;
 }
 
 // ---------- DASHBOARD ----------
