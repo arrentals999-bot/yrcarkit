@@ -366,6 +366,10 @@ button { cursor: pointer; font: inherit; }
 .categorize-option .cat-explain {
   font-size: 12px; color: var(--muted); margin-top: 4px;
 }
+.categorize-option .cat-mapping {
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  margin-top: 4px;
+}
 .categorize-option.continue   { border-left: 4px solid var(--success); }
 .categorize-option.new-battery { border-left: 4px solid var(--primary); }
 .categorize-option.testing    { border-left: 4px solid var(--warn); }

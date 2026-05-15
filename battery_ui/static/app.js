@@ -127,22 +127,30 @@ async function openCategorizeModal(sessionKey) {
       apiGet("/api/labelling/suggest-next"),
     ]);
 
+    const activeChs = (det.channels||[]).filter(c => !c.skipped).map(c => c.channel);
+    const nActive = activeChs.length;
     info.innerHTML = `
       <div><strong>${sessionKey}</strong> — started ${det.started || ''}</div>
-      <div style="color: var(--muted); margin-top: 3px;">
-        Channels active: ${(det.channels||[]).filter(c => !c.skipped).map(c => "CH"+c.channel).join(", ")}
+      <div style="margin-top: 5px;">
+        <strong style="color: ${nActive < 7 ? 'var(--warn)' : 'var(--success)'};">${nActive} channel${nActive===1?'':'s'} active in this session: ${activeChs.map(c => "CH"+c).join(", ")}</strong>
+        ${nActive < 7 ? '<div style="color: var(--warn); font-size: 11px; margin-top: 2px;">⚠ Partial session detected — fewer than 7 channels. Cell range will match.</div>' : ''}
       </div>
     `;
 
     const cls = { continue_battery: "continue", new_battery: "new-battery", testing: "testing" };
     const used = Object.keys(suggest.battery_progress || {}).filter(b => b !== "TEST").sort();
-    let html = (suggest.suggestions || []).map(s => `
-      <button class="categorize-option ${cls[s.kind]}" onclick='applyCategorize(${JSON.stringify(sessionKey)}, ${JSON.stringify(s).replace(/'/g, "&apos;")})'>
-        <div class="cat-headline">${escapeHtml(s.label)}</div>
-        <div class="cat-explain">${escapeHtml(s.explanation)}</div>
-      </button>
-    `).join("");
-    // Always include a "specific letter" option for picking any other battery
+    let html = (suggest.suggestions || []).map(s => {
+      const mapping = previewChannelMapping(activeChs, s);
+      return `
+        <button class="categorize-option ${cls[s.kind]}" onclick='applyCategorize(${JSON.stringify(sessionKey)}, ${JSON.stringify(s).replace(/'/g, "&apos;")})'>
+          <div class="cat-headline">${escapeHtml(s.label)}</div>
+          <div class="cat-explain">${escapeHtml(s.explanation)}</div>
+          <div class="cat-mapping">${mapping}</div>
+        </button>
+      `;
+    }).join("");
+    // Always include a "specific letter" option for picking any other battery.
+    // Cell range pre-fills to match active channel count.
     html += `
       <div class="categorize-option new-battery" style="cursor: default;">
         <div class="cat-headline" style="display:flex; align-items:center; gap:8px; flex-wrap: wrap;">
@@ -151,15 +159,27 @@ async function openCategorizeModal(sessionKey) {
           <span>cells</span>
           <input type="number" id="custom-cell-start" min="1" max="28" value="1" style="width:55px; padding:4px 8px; font-size:14px;">
           <span>-</span>
-          <input type="number" id="custom-cell-end" min="1" max="28" value="7" style="width:55px; padding:4px 8px; font-size:14px;">
+          <input type="number" id="custom-cell-end" min="1" max="28" value="${nActive}" style="width:55px; padding:4px 8px; font-size:14px;">
           <button class="btn-primary" style="padding: 4px 12px; font-size: 13px;" onclick="applyCustomLetter('${sessionKey}')">Apply</button>
         </div>
-        <div class="cat-explain">Use any letter (D, M, etc.) when starting a different physical pack. Already used: ${used.length ? used.join(", ") : "none"}.</div>
+        <div class="cat-explain">Use any letter (D, M, etc.) when starting a different physical pack. Already used: ${used.length ? used.join(", ") : "none"}. Cell range pre-filled to ${nActive} (matches active channels).</div>
       </div>`;
     opts.innerHTML = html;
   } catch (e) {
     info.innerHTML = `<span style="color: var(--danger)">Failed to load: ${e}</span>`;
   }
+}
+
+function previewChannelMapping(activeChannels, suggestion) {
+  if (suggestion.kind === "testing") return "";
+  const cs = suggestion.cell_start, ce = suggestion.cell_end;
+  const cells = [];
+  for (let c = cs; c <= ce; c++) cells.push(c);
+  if (cells.length !== activeChannels.length) {
+    return `<span style="color: var(--danger);">⚠ ${cells.length} cells but ${activeChannels.length} channels — won't save until matched</span>`;
+  }
+  const pairs = activeChannels.map((ch, i) => `<span style="color: var(--primary-dark)">CH${ch}→${suggestion.battery}-${cells[i]}</span>`).join(" · ");
+  return `<div style="margin-top: 6px; font-size: 11px; padding: 4px 8px; background: #eff6ff; border-radius: 3px;">Will map: ${pairs}</div>`;
 }
 
 async function applyCustomLetter(sessionKey) {

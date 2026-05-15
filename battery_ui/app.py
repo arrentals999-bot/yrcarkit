@@ -223,12 +223,24 @@ def api_apply_pending(session_key):
 
 @app.get("/api/labelling/suggest-next")
 def api_suggest_next_label():
-    """When a new YRCARKIT session appears, compute likely-correct labels
-    based on the current routine: continue current battery, or start a new one,
-    or set aside as testing."""
+    """When a new YRCARKIT session appears, compute likely-correct labels.
+    Adapts to the LATEST session's active channel count so partial-channel
+    swaps (e.g., user reloaded only CH1 + CH2) get suggestions sized correctly."""
     sessions = db.scan_sessions()
     if not sessions:
         return jsonify({"current_battery": None, "suggestions": []})
+
+    # How many channels are active in the latest session? (drives cell count)
+    latest = sessions[-1]
+    skip = {3}
+    latest_label = db.get_session_label(latest["session_key"])
+    if latest_label:
+        try:
+            skip = set(json.loads(latest_label["skip_channels"]))
+        except Exception:
+            pass
+    active_channels_latest = sorted([c for c in latest["channels"] if c not in skip])
+    n_active = len(active_channels_latest)
 
     # Walk all session labels to figure out where each battery stands
     conn = db.get_local_conn()
@@ -260,57 +272,61 @@ def api_suggest_next_label():
                 next_start = c
                 break
         if next_start:
-            next_end = min(next_start + 6, 28)
-            # extend forward only as far as 7 contiguous unlabelled cells
+            # Extend by n_active-1 (or fewer if hit a covered cell or 28)
+            next_end = min(next_start + n_active - 1, 28)
             for c in range(next_start + 1, next_end + 1):
                 if c in covered:
                     next_end = c - 1
                     break
+            n_cells = next_end - next_start + 1
             suggestions.append({
                 "kind": "continue_battery",
-                "label": f"Continue Battery {bat} - cells {next_start} to {next_end}",
+                "label": f"Continue Battery {bat} - cells {next_start} to {next_end} ({n_cells} cells)",
                 "battery": bat,
                 "cell_start": next_start,
                 "cell_end": next_end,
                 "session_type": "production",
-                "explanation": f"Battery {bat} has {count}/28 cells labelled. Next gap is cells {next_start}-{next_end}.",
+                "explanation": f"Battery {bat} has {count}/28 labelled. {n_active} channels active in this session, so suggesting cells {next_start}-{next_end}.",
             })
 
     # Suggest a new battery letter (next available after the latest)
     used = sorted(battery_progress.keys())
     next_letter = "A"
     if used:
-        # Pick next letter after the highest used (skipping TEST)
         real = [b for b in used if b != "TEST"]
         if real:
             last = max(real)
             if last < "Z":
                 next_letter = chr(ord(last) + 1)
             else:
-                next_letter = "AA"  # extreme edge
+                next_letter = "AA"
+    new_end = min(n_active, 28)
     suggestions.append({
         "kind": "new_battery",
-        "label": f"Start new Battery {next_letter} - cells 1 to 7",
+        "label": f"Start new Battery {next_letter} - cells 1 to {new_end} ({n_active} cells)",
         "battery": next_letter,
         "cell_start": 1,
-        "cell_end": 7,
+        "cell_end": new_end,
         "session_type": "production",
-        "explanation": f"Begin a new pack. Letter {next_letter} is the next available.",
+        "explanation": f"Begin a new pack. Letter {next_letter} is next available. {n_active} channels active.",
     })
 
     # Always offer testing
     suggestions.append({
         "kind": "testing",
-        "label": "Testing / set-aside (not part of any pack)",
+        "label": f"Testing / set-aside ({n_active} channels)",
         "battery": "TEST",
         "cell_start": 1,
-        "cell_end": 7,
+        "cell_end": new_end,
         "session_type": "testing",
         "explanation": "Use for module sanity-checks, retests, or experimental work. Won't be eligible for pack-building.",
     })
 
     return jsonify({
         "battery_progress": {b: sorted(c) for b, c in battery_progress.items()},
+        "latest_session": latest["session_key"],
+        "active_channels": active_channels_latest,
+        "n_active_channels": n_active,
         "suggestions": suggestions,
     })
 
