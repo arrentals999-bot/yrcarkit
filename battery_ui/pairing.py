@@ -73,6 +73,9 @@ def verify_pair(a, b, pack_avg_cap):
     ir_a, ir_b   = a.get("ir_mohm") or 0, b.get("ir_mohm") or 0
     ven_a, ven_b = a.get("v_end") or 0, b.get("v_end") or 0
     trend_a, trend_b = a.get("trend"), b.get("trend")
+    cut_a, cut_b = a.get("discharge_cutoff_v"), b.get("discharge_cutoff_v")
+    cutoffs_match = (cut_a is not None and cut_b is not None
+                     and abs(cut_a - cut_b) < 0.05)
 
     # 1. IR delta within pair
     ir_delta = abs(ir_a - ir_b)
@@ -104,9 +107,18 @@ def verify_pair(a, b, pack_avg_cap):
                        "detail": f"max {max_ir:.1f} mΩ — exceeds healthy ceiling (Dr. Prius warns at 30)",
                        "source": "Dr. Prius app docs"})
 
-    # 3. End-of-discharge voltage delta within pair
+    # 3. End-of-discharge voltage delta within pair — ONLY valid when both
+    # modules were tested at the same cutoff voltage. A 6.4V-cutoff module
+    # naturally ends ~400 mV higher than a 6.0V-cutoff one — comparing them
+    # is a measurement artifact, not a real mismatch.
     ven_delta = abs(ven_a - ven_b)
-    if ven_delta <= 0.05:
+    if not cutoffs_match:
+        checks.append({"status": "warn", "label": "Vend delta (within pair)",
+                       "detail": (f"SKIPPED — modules tested at different cutoffs "
+                                  f"({cut_a} V vs {cut_b} V). Retest at matching cutoff "
+                                  f"before trusting this pair."),
+                       "source": "YRCARKIT cutoff transition"})
+    elif ven_delta <= 0.05:
         checks.append({"status": "pass", "label": "Vend delta (within pair)",
                        "detail": f"{ven_delta*1000:.0f} mV — tight match",
                        "source": "wrouesnel rebuild guide"})
@@ -528,6 +540,35 @@ def build_pack(modules, target_blocks=14, strategy="pair_opposites",
     pass_blocks = sum(1 for b in layout if b["verdict"] == "pass")
     warn_blocks = sum(1 for b in layout if b["verdict"] == "warn")
     fail_blocks = sum(1 for b in layout if b["verdict"] == "fail")
+
+    # cutoff audit — count modules tested at each cutoff voltage. If mixed,
+    # surface the list of stale-cutoff modules that need retesting.
+    stale_modules = []
+    cutoffs_present = set()
+    for b in layout:
+        for pos in ("a", "b"):
+            m = b.get(pos)
+            if not m:
+                continue
+            cv = m.get("discharge_cutoff_v")
+            if cv is not None:
+                cutoffs_present.add(cv)
+            if m.get("stale_cutoff"):
+                stale_modules.append({
+                    "battery": m.get("battery"),
+                    "cell_position": m.get("cell_position"),
+                    "session_key": m.get("session_key"),
+                    "channel": m.get("channel"),
+                    "cap_ah": m.get("cap_ah"),
+                    "v_end": m.get("v_end"),
+                    "block_number": b["block_number"],
+                })
+    cutoff_audit = {
+        "cutoffs_present": sorted(cutoffs_present),
+        "mixed": len(cutoffs_present) > 1,
+        "stale_count": len(stale_modules),
+        "stale_modules": stale_modules,
+    }
     pre_install_checklist = [
         {"label": "Module rest voltage ≥ 7.7 V each", "ack": False, "source": "Toyota service spec"},
         {"label": "No corrosion / electrolyte residue at terminals", "ack": False, "source": "Hybrid Battery Repair SD"},
@@ -558,6 +599,7 @@ def build_pack(modules, target_blocks=14, strategy="pair_opposites",
         "verification_summary": {
             "pass_blocks": pass_blocks, "warn_blocks": warn_blocks, "fail_blocks": fail_blocks,
         },
+        "cutoff_audit": cutoff_audit,
         "pre_install_checklist": pre_install_checklist,
         **grade_info,
     }
@@ -655,6 +697,8 @@ def _strip_module(m):
         "ir_mohm":     m.get("ir_mohm"),
         "v_end":       m.get("v_end"),
         "trend":       m.get("trend"),
+        "discharge_cutoff_v": m.get("discharge_cutoff_v"),
+        "stale_cutoff": m.get("stale_cutoff", False),
     }
 
 

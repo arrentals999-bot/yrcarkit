@@ -135,6 +135,36 @@ def scan_sessions():
     return out
 
 
+def infer_discharge_cutoff(filepath):
+    """Look at the MIN voltage reached during any F (discharge) table on this
+    channel. That's effectively the cutoff voltage the cycler was set to —
+    YRCARKIT terminates discharge when voltage hits the cutoff.
+
+    Returns one of: 6.0, 6.4, or the actual float if neither bucket fits, or
+    None if no discharge data exists yet.
+    """
+    conn = sqlite3.connect(filepath)
+    cur = conn.cursor()
+    cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'F%'")
+    f_tables = [r[0] for r in cur.fetchall()]
+    mins = []
+    for t in f_tables:
+        # only the discharging portion (current > 0) — exclude rest periods
+        r = cur.execute(f'SELECT MIN(vol) FROM "{t}" WHERE cur > 0').fetchone()
+        if r and r[0] is not None:
+            mins.append(r[0])
+    conn.close()
+    if not mins:
+        return None
+    raw_min = min(mins)
+    # bucket into the two known settings
+    if raw_min < 6.25:
+        return 6.0
+    if raw_min < 6.7:
+        return 6.4
+    return round(raw_min, 2)
+
+
 def read_cycles_for_channel(filepath):
     """Read all cycle tables from one channel DB. Returns sorted list of dicts."""
     conn = sqlite3.connect(filepath)
@@ -482,6 +512,7 @@ def build_module_pool():
             target = find_target_discharge(cycles)
             dis_caps = [c["cap_ah"] for c in cycles if c["kind"] == "F"]
             trend = classify_trend(dis_caps)
+            cutoff_v = infer_discharge_cutoff(fp)
 
             override = get_module_override(skey, ch) or {}
             battery = override.get("battery") or (label["battery"] if label else None)
@@ -503,6 +534,8 @@ def build_module_pool():
                 "trend": trend,
                 "status": status,
                 "notes": override.get("notes") or "",
+                "discharge_cutoff_v": cutoff_v,
+                "stale_cutoff": cutoff_v is not None and cutoff_v >= 6.3,  # 6.4V — needs retest
             }
             # auto-grade the module so the UI can color-code it
             from .pairing import grade_module

@@ -1103,6 +1103,7 @@ function renderPool() {
         <th>Battery / Cell</th>
         <th>Source</th>
         <th>Cap (Ah)</th><th>IR (mΩ)</th><th>Vend (V)</th>
+        <th title="Discharge cutoff voltage this module was tested at. 6.0V is the new industry standard; 6.4V is the old setting and under-reports cap.">Cutoff</th>
         <th>Trend</th>
         <th>Cycles</th>
         <th>Status</th>
@@ -1129,6 +1130,7 @@ function renderPool() {
             <td>${fmt(m.cap_ah)}</td>
             <td>${fmt(m.ir_mohm, 1)}</td>
             <td>${fmt(m.v_end, 3)}</td>
+            <td>${cutoffBadge(m)}</td>
             <td>${trendBadge(m.trend)}</td>
             <td><span class="cap-series" title="discharge caps each cycle — click for full detail" style="cursor:pointer" onclick="openModuleDetail('${m.session_key}', ${m.channel})">${(m.discharge_caps || []).map(c=>c.toFixed(2)).join('→')}</span></td>
             <td>
@@ -1407,6 +1409,7 @@ function renderPackResult(pack) {
       ${ swaps ? `<div class="swap-suggestions"><h4>How to improve this pack</h4>${swaps}</div>` : '' }
     </div>
     ${ pack.candidate_summary ? summarizeCandidates(pack.candidate_summary) : '' }
+    ${ renderCutoffAudit(pack) }
     <table>
       <thead><tr>
         <th>Block</th>
@@ -1493,12 +1496,59 @@ function renderPreInstallChecklist(pack) {
 function moduleCell(m) {
   if (!m) return "<em>—</em>";
   const tag = m.battery ? `${m.battery}-${m.cell_position}` : `(${m.session_key} CH${m.channel})`;
-  return `<strong>${tag}</strong> <span style="color:var(--muted)">${fmt(m.cap_ah)}Ah ${fmt(m.ir_mohm,1)}mΩ</span> ${trendBadge(m.trend, {small: true})}`;
+  return `<strong>${tag}</strong> <span style="color:var(--muted)">${fmt(m.cap_ah)}Ah ${fmt(m.ir_mohm,1)}mΩ</span> ${trendBadge(m.trend, {small: true})} ${cutoffBadge(m)}`;
+}
+
+// Cutoff badge — visually distinguish modules tested at old 6.4V cutoff (needs retest)
+// from modules tested at new 6.0V cutoff (industry standard, trust the number).
+function cutoffBadge(m) {
+  const cv = m.discharge_cutoff_v;
+  if (cv == null) return "";
+  if (cv >= 6.3) {
+    return `<span class="cutoff-badge stale" data-tip="Tested at OLD 6.4V cutoff — cap is under-reported by ~200-300 mAh, Vend can't be compared against 6.0V modules. Retest at 6.0V cutoff before trusting in pack.">6.4V ⚠</span>`;
+  }
+  if (cv >= 5.95 && cv <= 6.1) {
+    return `<span class="cutoff-badge fresh" data-tip="Tested at NEW 6.0V cutoff — industry standard, cap is trustworthy.">6.0V ✓</span>`;
+  }
+  return `<span class="cutoff-badge other" data-tip="Non-standard cutoff (${cv}V)">${cv}V</span>`;
 }
 
 function summarizeCandidates(s) {
   const byBat = Object.entries(s.by_battery || {}).map(([k,v]) => `${k}: ${v}`).join(" · ");
   return `<p style="color: var(--muted); font-size: 13px;">Candidate pool: ${s.eligible} eligible of ${s.total_modules} total (${byBat || 'none labelled yet'})</p>`;
+}
+
+// Cutoff audit banner — only show if the pack mixes 6.4V and 6.0V cutoff modules.
+// Tells the user exactly which modules to retest at the new cutoff.
+function renderCutoffAudit(pack) {
+  const c = pack.cutoff_audit;
+  if (!c || !c.mixed) {
+    if (c && c.cutoffs_present && c.cutoffs_present.length === 1) {
+      const cv = c.cutoffs_present[0];
+      const ok = (cv >= 5.95 && cv <= 6.1);
+      return `<div class="cutoff-banner ${ok ? 'ok' : 'warn'}">
+        ${ok ? '✓' : '⚠'} All modules in this pack were tested at <strong>${cv} V cutoff</strong>${ok ? ' (industry standard).' : '.'}
+      </div>`;
+    }
+    return "";
+  }
+  const items = c.stale_modules.map(m => {
+    const tag = m.battery ? `${m.battery}-${m.cell_position}` : `(${m.session_key} CH${m.channel})`;
+    return `<li><strong>${tag}</strong> in Block ${m.block_number} — current cap ${fmt(m.cap_ah)} Ah (likely +200–300 mAh higher at 6.0V cutoff)</li>`;
+  }).join("");
+  return `
+    <div class="cutoff-banner fail">
+      <div style="font-size: 14px; margin-bottom: 6px;">
+        ⚠ <strong>Cutoff mismatch: this pack mixes ${c.cutoffs_present.join(' V and ')} V cutoff modules.</strong>
+      </div>
+      <div style="font-size: 12px; margin-bottom: 8px;">
+        You changed the YRCARKIT cutoff from 6.4V to 6.0V on 2026-05-10. Older sessions can't be directly compared
+        with newer ones — the Vend check is auto-skipped on mixed pairs, but the cap numbers are still under-reported
+        for the old-cutoff modules. <strong>Retest these ${c.stale_count} modules at 6.0V cutoff:</strong>
+      </div>
+      <ul style="margin: 0 0 6px 18px; font-size: 12px;">${items}</ul>
+    </div>
+  `;
 }
 
 function renderThresholdSuggestions(suggestions, needed) {
