@@ -512,26 +512,33 @@ function renderChannelLoadout(liveChannels) {
       return `<div class="loadout-row empty">
         <span class="loadout-ch">CH${ch}</span>
         <span class="loadout-arrow">→</span>
-        <span class="loadout-cell"><em style="color:var(--muted)">empty / not cycling</em></span>
+        <span class="loadout-cell"><em style="color:rgba(255,255,255,0.5)">empty / not cycling</em></span>
+        <span></span><span></span>
+        <button class="loadout-swap-btn" onclick="openChannelSwap(${ch})">🔄 Load new</button>
       </div>`;
     }
     const cellLabel = c.cell_label || '<em style="color:var(--danger)">unlabelled</em>';
     let phaseIcon = '';
     let phaseColor = '';
-    if (c.is_resting) { phaseIcon = '⏸'; phaseColor = 'var(--muted)'; }
-    else if (c.current_phase === 'CHARGE')    { phaseIcon = '⚡'; phaseColor = '#16a34a'; }
-    else if (c.current_phase === 'DISCHARGE') { phaseIcon = '🔻'; phaseColor = '#2563eb'; }
+    if (c.is_resting) { phaseIcon = '⏸'; phaseColor = 'rgba(255,255,255,0.7)'; }
+    else if (c.current_phase === 'CHARGE')    { phaseIcon = '⚡'; phaseColor = '#86efac'; }
+    else if (c.current_phase === 'DISCHARGE') { phaseIcon = '🔻'; phaseColor = '#93c5fd'; }
     const ageStr = c.age_s < 60 ? `${c.age_s}s` : `${Math.floor(c.age_s/60)}m`;
     const stale = c.age_s > 600;
+    const stopped = stale || (c.is_resting && c.age_s > 60);
     const stateLine = stale
-      ? `<span style="color:var(--muted)">stopped ${ageStr} ago</span>`
+      ? `<span style="opacity:0.7">stopped ${ageStr} ago</span>`
       : `<span style="color:${phaseColor};font-weight:600">${phaseIcon} ${c.current_phase}</span> cycle ${c.current_cycle}/3 · ${fmt(c.current_vol,2)}V`;
+    const swapBtn = stopped
+      ? `<button class="loadout-swap-btn" onclick="openChannelSwap(${ch})" title="Pulling this module? Queue the next one">🔄 Swap</button>`
+      : `<span></span>`;
     return `<div class="loadout-row">
       <span class="loadout-ch">CH${ch}</span>
       <span class="loadout-arrow">→</span>
       <span class="loadout-cell">${cellLabel}</span>
       <span class="loadout-state">${stateLine}</span>
       <span class="loadout-age">${ageStr} ago</span>
+      ${swapBtn}
     </div>`;
   }).join("");
 
@@ -545,6 +552,62 @@ function renderChannelLoadout(liveChannels) {
       <p class="live-meta" style="font-size: 11px; margin-top: 8px;">CH3 is always empty (dead channel). Auto-updates every 30s. All data permanently saved + backed up to GitHub every 15min.</p>
     </div>
   `;
+}
+
+// ---------- SINGLE-CHANNEL SWAP (per-row "Swap" button on loadout) ----------
+
+async function openChannelSwap(ch) {
+  // Compute smart suggestion: continue current battery, fill next unlabelled cell
+  try {
+    const suggest = await apiGet("/api/labelling/suggest-next");
+    const inProg = suggest.suggestions.find(s => s.kind === "continue_battery");
+    const newBat = suggest.suggestions.find(s => s.kind === "new_battery");
+
+    // Default: continue current battery if in progress, else new
+    const suggestedBatt = inProg ? inProg.battery : (newBat ? newBat.battery : "F");
+    const suggestedCell = inProg ? inProg.cell_start : 1;
+
+    const cell = prompt(
+      `Loading new module on CH${ch}.\n\n` +
+      `Which cell # (1-28) of Battery ${suggestedBatt} is this?\n\n` +
+      `Suggested: ${suggestedCell} (next unlabelled in Battery ${suggestedBatt})\n\n` +
+      `Type a different number to override, or just press OK for the suggested.`,
+      String(suggestedCell)
+    );
+    if (cell === null) return;
+    const cellNum = parseInt(cell);
+    if (!cellNum || cellNum < 1 || cellNum > 28) {
+      alert("Cell number must be 1-28"); return;
+    }
+
+    const battery = prompt(`Battery letter for this new module:`, suggestedBatt);
+    if (!battery) return;
+    const battUp = battery.trim().toUpperCase();
+    if (!battUp.match(/^[A-Z]+$/)) { alert("Battery letter A-Z"); return; }
+
+    // Queue this as a 1-cell label
+    const r = await apiPost("/api/labelling/pending", {
+      battery: battUp,
+      cell_start: cellNum,
+      cell_end: cellNum,
+      session_type: "production",
+      notes: `Single-channel swap on CH${ch}: ${battUp}-${cellNum}`,
+    });
+    if (r.ok) {
+      renderPendingBanner();
+      alert(
+        `✓ Queued: next YRCARKIT session on CH${ch} will be labelled ${battUp}-${cellNum}.\n\n` +
+        `Next steps:\n` +
+        `1. Physically load the module on CH${ch}\n` +
+        `2. Press Start in YRCARKIT for CH${ch} only\n` +
+        `3. Within 30s: auto-labels and appears in loadout`
+      );
+    } else {
+      alert("Queue failed: " + JSON.stringify(r));
+    }
+  } catch (e) {
+    alert("Error: " + e);
+  }
 }
 
 // ---------- PRE-QUEUE MODAL (user-triggered, set queue before starting YRCARKIT) ----------

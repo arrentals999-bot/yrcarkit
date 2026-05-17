@@ -530,11 +530,23 @@ td.detail-link { color: var(--primary); cursor: pointer; text-decoration: underl
   padding: 8px 14px;
   border-radius: 5px;
   display: grid;
-  grid-template-columns: 70px 30px 1fr 2fr 80px;
+  grid-template-columns: 70px 30px 1fr 2fr 80px 110px;
   align-items: center;
   gap: 10px;
   font-size: 15px;
 }
+.loadout-swap-btn {
+  background: white;
+  color: var(--primary-dark);
+  border: none;
+  padding: 5px 10px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.loadout-swap-btn:hover { background: #f3f4f6; }
 .loadout-row.empty { opacity: 0.55; }
 .loadout-row .loadout-ch { font-weight: 700; font-size: 17px; }
 .loadout-row .loadout-arrow { color: rgba(255,255,255,0.6); font-size: 16px; }
