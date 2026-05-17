@@ -48,6 +48,21 @@
     <p class="hint">Each YRCARKIT session needs a battery letter and a cell range so the modules can be identified. Unlabelled sessions show in red.</p>
     <div id="sessions-list"><p class="loading">Loading…</p></div>
 
+    <!-- Pre-queue modal — user-triggered, for arming the label BEFORE pressing Start in YRCARKIT -->
+    <div id="prequeue-modal" class="modal hidden">
+      <div class="modal-content">
+        <h3>📋 Queue label for next session</h3>
+        <p style="color: var(--muted); font-size: 13px; margin-top: -4px;">
+          Set this BEFORE you press Start in YRCARKIT. When YRCARKIT writes the new session DB, the label auto-applies — no further interaction needed.
+        </p>
+        <div id="prequeue-options"></div>
+        <div class="modal-buttons">
+          <button type="button" class="btn-cancel" onclick="closeModal('prequeue-modal')">Cancel</button>
+          <button type="button" class="btn-danger" onclick="clearPendingFromModal()">Clear current queue</button>
+        </div>
+      </div>
+    </div>
+
     <!-- Categorize-new-session modal — auto-opens when a fresh YRCARKIT session is detected -->
     <div id="categorize-modal" class="modal hidden">
       <div class="modal-content">

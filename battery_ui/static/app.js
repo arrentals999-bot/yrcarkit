@@ -66,9 +66,10 @@ async function renderPendingBanner() {
     if (!r.pending) { el.classList.add("hidden"); return; }
     const p = r.pending;
     el.innerHTML = `
-      <span><strong>📌 Pending label queued:</strong> next new session will be auto-labelled as
-      <strong>Battery ${p.battery} cells ${p.cell_start}-${p.cell_end}</strong>
+      <span>📌 <strong>Queued label:</strong> next new YRCARKIT session will auto-label as
+      <strong style="color: var(--primary-dark);">Battery ${p.battery} cells ${p.cell_start}-${p.cell_end}</strong>
       ${p.session_type === 'testing' ? '(testing)' : ''}
+      — <button style="background: white; border: 1px solid var(--primary); color: var(--primary-dark); padding: 2px 8px; border-radius: 3px; font-size: 11px; cursor: pointer;" onclick="openPrequeueModal()">change</button>
       <span style="color: var(--muted); font-size: 11px; margin-left: 8px;">queued ${p.queued_at}</span></span>
       <button class="banner-dismiss" onclick="cancelPendingLabel()" title="cancel queue">×</button>
     `;
@@ -534,11 +535,107 @@ function renderChannelLoadout(liveChannels) {
 
   el.innerHTML = `
     <div class="loadout-card">
-      <h3>📋 Channel loadout — what's in each YRCARKIT slot RIGHT NOW</h3>
+      <div style="display:flex; justify-content:space-between; align-items:start;">
+        <h3>📋 Channel loadout — what's in each YRCARKIT slot RIGHT NOW</h3>
+        <button class="btn-primary" style="background: white; color: var(--primary-dark); padding: 8px 14px; font-size: 13px; white-space: nowrap;" onclick="openPrequeueModal()">📋 Queue next session</button>
+      </div>
       <div class="loadout-rows">${rows}</div>
-      <p class="live-meta" style="font-size: 11px; margin-top: 8px;">CH3 is always empty (dead channel). Updates every 30s automatically. Use this to identify which physical module to pull next.</p>
+      <p class="live-meta" style="font-size: 11px; margin-top: 8px;">CH3 is always empty (dead channel). Auto-updates every 30s. All data permanently saved + backed up to GitHub every 15min.</p>
     </div>
   `;
+}
+
+// ---------- PRE-QUEUE MODAL (user-triggered, set queue before starting YRCARKIT) ----------
+
+async function openPrequeueModal() {
+  const opts = document.getElementById("prequeue-options");
+  opts.innerHTML = '<p class="loading">Computing suggestions…</p>';
+  document.getElementById("prequeue-modal").classList.remove("hidden");
+  try {
+    const [suggest, pending] = await Promise.all([
+      apiGet("/api/labelling/suggest-next"),
+      apiGet("/api/labelling/pending"),
+    ]);
+    const currentPending = pending.pending
+      ? `<div style="background: #eff6ff; border-left: 4px solid var(--primary); padding: 10px 14px; border-radius: 4px; margin-bottom: 14px; font-size: 13px;">
+           <strong>Currently queued:</strong> Battery ${pending.pending.battery} cells ${pending.pending.cell_start}-${pending.pending.cell_end}
+           <span style="color: var(--muted); font-size: 11px;">(queued ${pending.pending.queued_at})</span>
+         </div>`
+      : `<div style="background: #f9fafb; padding: 10px 14px; border-radius: 4px; margin-bottom: 14px; font-size: 13px; color: var(--muted);">
+           No pending queue. When YRCARKIT next starts, the categorize modal will pop up asking what to label it.
+         </div>`;
+
+    // Build option buttons from suggestions
+    const cls = { continue_battery: "continue", new_battery: "new-battery", testing: "testing" };
+    const battList = Object.keys(suggest.battery_progress || {}).filter(b => b !== "TEST").sort();
+    const optionButtons = (suggest.suggestions || []).map(s => `
+      <button class="categorize-option ${cls[s.kind]}" onclick='applyPrequeue(${JSON.stringify(s).replace(/'/g, "&apos;")})'>
+        <div class="cat-headline">${escapeHtml(s.label)}</div>
+        <div class="cat-explain">${escapeHtml(s.explanation)}</div>
+      </button>
+    `).join("");
+
+    opts.innerHTML = `
+      ${currentPending}
+      <p style="font-size: 12px; color: var(--muted); margin-bottom: 8px;">
+        <strong>Tip:</strong> Pre-queue before pressing Start in YRCARKIT. Auto-applies the moment the new session DB appears.
+      </p>
+      ${optionButtons}
+      <div class="categorize-option new-battery" style="cursor: default;">
+        <div class="cat-headline" style="display:flex; align-items:center; gap:8px; flex-wrap: wrap;">
+          <span>Specific battery + cells:</span>
+          <input type="text" id="prequeue-letter" maxlength="2" style="width:50px; padding:4px 8px; text-transform:uppercase; font-size:14px; font-weight:600;" placeholder="?">
+          <span>cells</span>
+          <input type="number" id="prequeue-start" min="1" max="28" value="1" style="width:55px; padding:4px 8px; font-size:14px;">
+          <span>-</span>
+          <input type="number" id="prequeue-end" min="1" max="28" value="7" style="width:55px; padding:4px 8px; font-size:14px;">
+          <button class="btn-primary" style="padding: 4px 12px; font-size: 13px;" onclick="applyPrequeueCustom()">Queue</button>
+        </div>
+        <div class="cat-explain">Used batteries so far: ${battList.length ? battList.join(", ") : "none"}. Use this for any letter/range not in the auto-suggestions above.</div>
+      </div>
+    `;
+  } catch (e) {
+    opts.innerHTML = `<div class="error-msg">${e}</div>`;
+  }
+}
+
+async function applyPrequeue(suggestion) {
+  const r = await apiPost("/api/labelling/pending", {
+    battery: suggestion.battery,
+    cell_start: suggestion.cell_start,
+    cell_end: suggestion.cell_end,
+    session_type: suggestion.session_type,
+    notes: `pre-queued via UI: ${suggestion.label}`,
+  });
+  if (r.ok) {
+    closeModal("prequeue-modal");
+    renderPendingBanner();
+    const t = $("#new-session-toast");
+    t.innerHTML = `<strong>✓ Queued:</strong> next session auto-labels as ${suggestion.battery} ${suggestion.cell_start}-${suggestion.cell_end}.`;
+    t.classList.remove("hidden");
+    setTimeout(() => t.classList.add("hidden"), 5000);
+  } else {
+    alert("Queue failed: " + JSON.stringify(r));
+  }
+}
+
+async function applyPrequeueCustom() {
+  const letter = ($("#prequeue-letter").value || "").trim().toUpperCase();
+  const cs = parseInt($("#prequeue-start").value);
+  const ce = parseInt($("#prequeue-end").value);
+  if (!letter || !letter.match(/^[A-Z]+$/)) { alert("Enter a letter (A-Z)"); return; }
+  if (!cs || !ce || ce < cs || cs < 1 || ce > 28) { alert("Cell range must be 1-28 ascending"); return; }
+  await applyPrequeue({
+    battery: letter, cell_start: cs, cell_end: ce,
+    session_type: "production", label: `Battery ${letter} cells ${cs}-${ce}`,
+  });
+}
+
+async function clearPendingFromModal() {
+  if (!confirm("Clear the current pending queue?")) return;
+  await apiDel("/api/labelling/pending");
+  closeModal("prequeue-modal");
+  renderPendingBanner();
 }
 
 function renderPreviousSession(prev) {
