@@ -825,26 +825,20 @@ def api_live():
     # Keep the original 'channels' field for backward compat (latest session only)
     channels_out = [c for c in live_channels if c["session_key"] == latest["session_key"]]
 
-    # Compute the previous session = most recently FULLY-FINISHED session
-    # (no channels still cycling). Skips any sessions that are part of the
-    # live set, so the panel doesn't show data that's also in 'also live'.
+    # Compute the previous session = the chronologically second-most-recent
+    # session that isn't the current primary live (sessions[-1]).
+    # We DO include sessions where some channels are still cycling (those
+    # channels show their finished cap and the still-cycling ones show
+    # current state). This matches user expectation: 'previous' = the batch
+    # I loaded BEFORE the current one, regardless of whether all channels
+    # have finished. If user wants to see all-finished-only, recent-sessions
+    # panel below has that.
     previous = None
     prev_sess = None
-    for s in reversed(sessions):  # newest first
-        if s["session_key"] in live_session_keys:
-            continue  # this session is in live or also-live blocks
-        # is every channel of this session stale (>5 min since last write)?
-        all_finished = True
-        for ch, fp in s["channel_paths"].items():
-            try:
-                if (now - os.path.getmtime(fp)) <= LIVE_THRESHOLD_S:
-                    all_finished = False
-                    break
-            except OSError:
-                continue
-        if all_finished:
-            prev_sess = s
-            break
+    # walk newest-first, skip primary live (sessions[-1]), take first other
+    for s in reversed(sessions[:-1]):  # everything except the latest
+        prev_sess = s
+        break
     if prev_sess:
         prev_label = db.get_session_label(prev_sess["session_key"])
         prev_skip = {3}
