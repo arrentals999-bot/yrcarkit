@@ -468,7 +468,9 @@ async function loadLive() {
         </div>`;
     }
 
-    renderChannelLoadout(allLive);
+    // Use all_channels (every channel's LATEST state regardless of age) for the
+    // loadout so finished-but-not-pulled modules stay visible.
+    renderChannelLoadout(live.all_channels || allLive);
     el.innerHTML = `
       <div class="live-card ${cls}">
         <div class="live-header">

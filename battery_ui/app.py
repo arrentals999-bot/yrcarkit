@@ -888,14 +888,63 @@ def api_live():
             "channels":         prev_channels,
         }
 
+    # ALSO build "all_channels" — the LATEST module on each of the 7 physical
+    # channels regardless of when it last wrote. Used by the Channel Loadout
+    # card so user always sees what physical module is currently in each slot
+    # even after the module stopped cycling but before being pulled.
+    all_channels = []
+    for ch in sorted(latest_per_channel.keys()):
+        mtime, sess, fp = latest_per_channel[ch]
+        live = db.read_live_state_for_channel(fp)
+        if not live:
+            continue
+        age_s = int(now - mtime)
+        sess_label = db.get_session_label(sess["session_key"])
+        sess_skip = {3}
+        if sess_label:
+            try:
+                sess_skip = set(json.loads(sess_label["skip_channels"]))
+            except Exception:
+                pass
+        cell_position = None
+        cell_label = None
+        if sess_label and ch not in sess_skip:
+            sess_active = sorted([c for c in sess["channels"] if c not in sess_skip])
+            sess_cells = list(range(sess_label["cell_start"], sess_label["cell_end"] + 1))
+            for c, cid in zip(sess_active, sess_cells):
+                if c == ch:
+                    cell_position = cid
+                    cell_label = f"{sess_label['battery']}-{cid}"
+                    break
+        cycle_n = (live["current_seq"] + 1) // 2
+        all_channels.append({
+            "channel":             ch,
+            "session_key":         sess["session_key"],
+            "session_started":     sess["started"],
+            "battery_label":       sess_label["battery"] if sess_label else None,
+            "cell_label":          cell_label,
+            "cell_position":       cell_position,
+            "current_table":       live["current_table"],
+            "current_phase":       live["current_phase"],
+            "current_cycle":       cycle_n,
+            "current_vol":         live["current_vol"],
+            "current_cur":         live["current_cur"],
+            "current_cap":         live["current_cap"],
+            "is_resting":          (live.get("current_procedure") in (2, 4) or
+                                    (live["current_cur"] is not None and abs(live["current_cur"]) < 0.1)),
+            "age_s":               age_s,
+            "is_live":             age_s <= LIVE_THRESHOLD_S,
+        })
+
     return jsonify({
         "is_live":         is_live,
         "session_key":     latest["session_key"],
         "session_started": latest["started"],
         "battery_label":   label["battery"] if label else None,
         "channels":        channels_out,
-        "live_channels":   live_channels,       # NEW: ALL channels live across all sessions
-        "live_sessions":   live_sessions_meta,  # NEW: list of distinct sessions with live activity
+        "live_channels":   live_channels,
+        "live_sessions":   live_sessions_meta,
+        "all_channels":    all_channels,         # NEW: latest module per channel, no age filter
         "previous":        previous,
     })
 
