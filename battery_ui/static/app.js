@@ -1218,31 +1218,46 @@ async function bulkSetStatus(status) {
 // ---------- BUILD ----------
 let _previewedPack = null;
 
-async function loadBuildForm() {
-  try {
-    const pool = await apiGet("/api/pool");
-    const batteries = [...new Set(pool.map(m => m.battery).filter(Boolean))].sort();
-    const sel = $('#build-form select[name="target_battery"]');
-    sel.innerHTML = '<option value="ANY">any (use whole pool)</option>' + batteries.map(b => `<option value="${b}">${b}</option>`).join("");
-  } catch (e) { /* ignore */ }
+// Bind build-form handlers ONCE at script load — NOT inside loadBuildForm.
+// Previously they were bound after `await apiGet("/api/pool")` which meant the
+// user could click "Preview pack" before the handler existed, causing the form
+// to submit as a default GET to "/" and reload back to the Dashboard tab.
+function _bindBuildFormHandlers() {
+  const form = $("#build-form");
+  if (!form || form.dataset.bound === "1") return;
+  form.dataset.bound = "1";
 
-  $("#build-form").onsubmit = async (e) => {
+  form.addEventListener("submit", async (e) => {
     e.preventDefault();
-    const body = readBuildForm();
-    $("#build-result").innerHTML = '<p class="loading">Building pack…</p>';
-    const pack = await apiPost("/api/packs/preview", body);
-    renderPackResult(pack);
-  };
+    e.stopPropagation();
+    try {
+      const body = readBuildForm();
+      $("#build-result").innerHTML = '<p class="loading">Building pack…</p>';
+      const pack = await apiPost("/api/packs/preview", body);
+      renderPackResult(pack);
+      setTimeout(() => { $("#build-result").scrollIntoView({behavior:"smooth", block:"start"}); }, 100);
+    } catch (err) {
+      $("#build-result").innerHTML = `<div class="error-msg">Preview failed: ${escapeHtml(String(err))}</div>`;
+      console.error("preview error:", err);
+    }
+    return false;
+  });
 
-  $("#compare-strategies-btn").onclick = async () => {
-    const body = readBuildForm();
-    delete body.strategy;
-    $("#build-result").innerHTML = '<p class="loading">Comparing all 3 strategies…</p>';
-    const res = await apiPost("/api/packs/compare", body);
-    renderStrategyCompare(res);
-  };
+  $("#compare-strategies-btn").addEventListener("click", async () => {
+    try {
+      const body = readBuildForm();
+      delete body.strategy;
+      $("#build-result").innerHTML = '<p class="loading">Comparing all 3 strategies…</p>';
+      const res = await apiPost("/api/packs/compare", body);
+      renderStrategyCompare(res);
+      setTimeout(() => { $("#build-result").scrollIntoView({behavior:"smooth", block:"start"}); }, 100);
+    } catch (err) {
+      $("#build-result").innerHTML = `<div class="error-msg">Compare failed: ${escapeHtml(String(err))}</div>`;
+      console.error("compare error:", err);
+    }
+  });
 
-  $("#save-pack-btn").onclick = async () => {
+  $("#save-pack-btn").addEventListener("click", async () => {
     if (!_previewedPack || _previewedPack.error) return;
     const r = await apiPost("/api/packs/save", _previewedPack);
     if (r.ok) {
@@ -1253,7 +1268,22 @@ async function loadBuildForm() {
     } else {
       alert("Save failed: " + JSON.stringify(r));
     }
-  };
+  });
+}
+// Bind immediately — form exists in static HTML at page load.
+_bindBuildFormHandlers();
+
+async function loadBuildForm() {
+  // Handlers were bound at page load; this only refreshes the battery dropdown.
+  _bindBuildFormHandlers();  // idempotent no-op if already bound
+  try {
+    const pool = await apiGet("/api/pool");
+    const batteries = [...new Set(pool.map(m => m.battery).filter(Boolean))].sort();
+    const sel = $('#build-form select[name="target_battery"]');
+    const current = sel.value;
+    sel.innerHTML = '<option value="ANY">any (use whole pool)</option>' + batteries.map(b => `<option value="${b}">${b}</option>`).join("");
+    if (current && [...sel.options].some(o => o.value === current)) sel.value = current;
+  } catch (e) { /* ignore */ }
 }
 
 function readBuildForm() {
