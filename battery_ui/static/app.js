@@ -467,6 +467,7 @@ async function loadLive() {
         </div>`;
     }
 
+    renderChannelLoadout(allLive);
     el.innerHTML = `
       <div class="live-card ${cls}">
         <div class="live-header">
@@ -487,6 +488,57 @@ async function loadLive() {
       ${alsoLiveCards}`;
     renderPreviousSession(live.previous);
   } catch (e) { /* ignore */ }
+}
+
+function renderChannelLoadout(liveChannels) {
+  // Big easy-to-read CH -> module mapping. Shows all 7 physical channels
+  // (skip CH3 = dead). Tells the user at a glance what to find in each slot.
+  const el = document.getElementById("loadout-panel");
+  if (!el) return;
+  if (!liveChannels || !liveChannels.length) { el.classList.add("hidden"); return; }
+  el.classList.remove("hidden");
+
+  // Build a lookup of channel -> live entry
+  const byCh = {};
+  for (const c of liveChannels) byCh[c.channel] = c;
+
+  // All 7 active channels in physical order
+  const rows = [1, 2, 4, 5, 6, 7, 8].map(ch => {
+    const c = byCh[ch];
+    if (!c) {
+      return `<div class="loadout-row empty">
+        <span class="loadout-ch">CH${ch}</span>
+        <span class="loadout-arrow">→</span>
+        <span class="loadout-cell"><em style="color:var(--muted)">empty / not cycling</em></span>
+      </div>`;
+    }
+    const cellLabel = c.cell_label || '<em style="color:var(--danger)">unlabelled</em>';
+    let phaseIcon = '';
+    let phaseColor = '';
+    if (c.is_resting) { phaseIcon = '⏸'; phaseColor = 'var(--muted)'; }
+    else if (c.current_phase === 'CHARGE')    { phaseIcon = '⚡'; phaseColor = '#16a34a'; }
+    else if (c.current_phase === 'DISCHARGE') { phaseIcon = '🔻'; phaseColor = '#2563eb'; }
+    const ageStr = c.age_s < 60 ? `${c.age_s}s` : `${Math.floor(c.age_s/60)}m`;
+    const stale = c.age_s > 600;
+    const stateLine = stale
+      ? `<span style="color:var(--muted)">stopped ${ageStr} ago</span>`
+      : `<span style="color:${phaseColor};font-weight:600">${phaseIcon} ${c.current_phase}</span> cycle ${c.current_cycle}/3 · ${fmt(c.current_vol,2)}V`;
+    return `<div class="loadout-row">
+      <span class="loadout-ch">CH${ch}</span>
+      <span class="loadout-arrow">→</span>
+      <span class="loadout-cell">${cellLabel}</span>
+      <span class="loadout-state">${stateLine}</span>
+      <span class="loadout-age">${ageStr} ago</span>
+    </div>`;
+  }).join("");
+
+  el.innerHTML = `
+    <div class="loadout-card">
+      <h3>📋 Channel loadout — what's in each YRCARKIT slot RIGHT NOW</h3>
+      <div class="loadout-rows">${rows}</div>
+      <p class="live-meta" style="font-size: 11px; margin-top: 8px;">CH3 is always empty (dead channel). Updates every 30s automatically. Use this to identify which physical module to pull next.</p>
+    </div>
+  `;
 }
 
 function renderPreviousSession(prev) {

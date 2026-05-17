@@ -513,6 +513,36 @@ button { cursor: pointer; font: inherit; }
 .row-clickable:hover { background: #eef2ff !important; }
 td.detail-link { color: var(--primary); cursor: pointer; text-decoration: underline; font-size: 12px; }
 
+/* Channel loadout panel (very top — quick-glance CH-to-module mapping) */
+#loadout-panel { margin-bottom: 18px; }
+#loadout-panel.hidden { display: none; }
+.loadout-card {
+  background: linear-gradient(135deg, #1e40af, #3b82f6);
+  color: white;
+  border-radius: 8px;
+  padding: 16px 20px;
+  box-shadow: 0 2px 8px rgba(30, 64, 175, 0.3);
+}
+.loadout-card h3 { margin: 0 0 12px; font-size: 16px; color: white; }
+.loadout-rows { display: grid; gap: 4px; }
+.loadout-row {
+  background: rgba(255,255,255,0.12);
+  padding: 8px 14px;
+  border-radius: 5px;
+  display: grid;
+  grid-template-columns: 70px 30px 1fr 2fr 80px;
+  align-items: center;
+  gap: 10px;
+  font-size: 15px;
+}
+.loadout-row.empty { opacity: 0.55; }
+.loadout-row .loadout-ch { font-weight: 700; font-size: 17px; }
+.loadout-row .loadout-arrow { color: rgba(255,255,255,0.6); font-size: 16px; }
+.loadout-row .loadout-cell { font-weight: 700; font-size: 16px; }
+.loadout-row .loadout-state { font-size: 13px; opacity: 0.95; }
+.loadout-row .loadout-age { font-size: 11px; opacity: 0.7; text-align: right; }
+.loadout-card .live-meta { color: rgba(255,255,255,0.8); }
+
 /* previous session panel (between live and recent sessions) */
 #previous-session-panel { margin-bottom: 18px; }
 #previous-session-panel.hidden { display: none; }
