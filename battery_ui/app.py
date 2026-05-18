@@ -908,7 +908,9 @@ def api_live():
                 pass
         cell_position = None
         cell_label = None
+        channel_battery = None
         if sess_label and ch not in sess_skip:
+            channel_battery = sess_label["battery"]
             sess_active = sorted([c for c in sess["channels"] if c not in sess_skip])
             sess_cells = list(range(sess_label["cell_start"], sess_label["cell_end"] + 1))
             for c, cid in zip(sess_active, sess_cells):
@@ -916,12 +918,21 @@ def api_live():
                     cell_position = cid
                     cell_label = f"{sess_label['battery']}-{cid}"
                     break
+        # Per-channel module_override takes precedence (single-channel swaps
+        # that don't fit the standard session-label cell-range mapping)
+        override = db.get_module_override(sess["session_key"], ch)
+        if override:
+            if override.get("battery"):
+                channel_battery = override["battery"]
+            if override.get("cell_position"):
+                cell_position = override["cell_position"]
+                cell_label = f"{channel_battery}-{cell_position}" if channel_battery else f"?-{cell_position}"
         cycle_n = (live["current_seq"] + 1) // 2
         all_channels.append({
             "channel":             ch,
             "session_key":         sess["session_key"],
             "session_started":     sess["started"],
-            "battery_label":       sess_label["battery"] if sess_label else None,
+            "battery_label":       channel_battery,
             "cell_label":          cell_label,
             "cell_position":       cell_position,
             "current_table":       live["current_table"],
