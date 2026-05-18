@@ -228,37 +228,60 @@ let _lastSessionKey = null;
 let _pollTimer = null;
 let _liveMode  = false;
 
+async function tryApplyPendingTo(sessionKey) {
+  // Returns {applied, ok, error} — applies if pending exists, no-op otherwise
+  try {
+    const pend = await apiGet("/api/labelling/pending");
+    if (!pend.pending) return {ok: false, reason: "no-queue"};
+    const r = await apiPost(`/api/labelling/apply-pending/${sessionKey}`, {});
+    if (r.ok) {
+      const t = $("#new-session-toast");
+      t.innerHTML = `<strong>Auto-labelled session ${sessionKey}</strong> as ${r.applied.battery} cells ${r.applied.cell_start}-${r.applied.cell_end}.`;
+      t.classList.remove("hidden");
+      setTimeout(() => t.classList.add("hidden"), 8000);
+      renderPendingBanner();
+      return {ok: true, applied: r.applied};
+    }
+    return {ok: false, reason: r.error || "apply-failed"};
+  } catch (e) {
+    return {ok: false, reason: String(e)};
+  }
+}
+
 async function pollForUpdates() {
   try {
     const d = await apiGet("/api/dashboard");
     const ls = d.latest_session;
     if (!ls) return;
-    if (_lastSessionKey === null) {
-      _lastSessionKey = ls.session_key;
-    } else if (ls.session_key !== _lastSessionKey) {
-      _lastSessionKey = ls.session_key;
-      // Try to auto-apply a queued pending label first
-      try {
-        const pend = await apiGet("/api/labelling/pending");
-        if (pend.pending) {
-          const r = await apiPost(`/api/labelling/apply-pending/${ls.session_key}`, {});
-          if (r.ok) {
-            const t = $("#new-session-toast");
-            t.innerHTML = `<strong>Auto-labelled new session</strong> as ${r.applied.battery} cells ${r.applied.cell_start}-${r.applied.cell_end}.`;
-            t.classList.remove("hidden");
-            setTimeout(() => t.classList.add("hidden"), 8000);
-            const active = $(".tab.active").dataset.tab;
-            switchTab(active);
-            renderPendingBanner();
-            return;
-          }
-          // pending exists but couldn't apply — fall through to manual modal
-        }
-      } catch(_) {}
-      showNewSessionToast(ls.session_key);
-      const active = $(".tab.active").dataset.tab;
-      switchTab(active);
+
+    const isFirstPoll = (_lastSessionKey === null);
+    const isNewSession = !isFirstPoll && (ls.session_key !== _lastSessionKey);
+    _lastSessionKey = ls.session_key;
+
+    // ALWAYS try to apply a queued label to the latest session if it's still unlabelled.
+    // This catches the "page was opened after the new session already started" case
+    // that previously left queues stuck forever.
+    if (!d.latest_label) {
+      const result = await tryApplyPendingTo(ls.session_key);
+      if (result.ok) {
+        const active = $(".tab.active").dataset.tab;
+        switchTab(active);
+        $("#unlabelled-banner").classList.add("hidden");
+        return;
+      }
+      // Queue couldn't apply (count mismatch etc) and only show categorize modal
+      // for a *genuinely new* session — not on every poll of an old unlabelled one
+      if (isNewSession && result.reason !== "no-queue") {
+        showNewSessionToast(ls.session_key);
+        const active = $(".tab.active").dataset.tab;
+        switchTab(active);
+      } else if (isNewSession) {
+        showNewSessionToast(ls.session_key);
+        const active = $(".tab.active").dataset.tab;
+        switchTab(active);
+      }
     }
+
     if (ls && !d.latest_label) {
       showUnlabelledBanner({...ls, label: null});
     } else {
