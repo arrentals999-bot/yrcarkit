@@ -537,6 +537,18 @@ def build_module_pool():
                 "discharge_cutoff_v": cutoff_v,
                 "stale_cutoff": cutoff_v is not None and cutoff_v >= 6.3,  # 6.4V — needs retest
             }
+            # Corrected cap = what the module would likely read if retested at the
+            # 6.0V industry-standard cutoff. Based on F-12 real measurement (5.26 -> 5.31
+            # = +50 mAh after retest), we use a conservative +100 mAh adjustment for
+            # stale 6.4V cutoff modules. Lets the user trust D/H batt readings without
+            # waiting hours to re-cycle every module.
+            if mod["cap_ah"] is not None:
+                if mod["stale_cutoff"]:
+                    mod["cap_ah_corrected"] = round(mod["cap_ah"] + 0.10, 3)
+                else:
+                    mod["cap_ah_corrected"] = mod["cap_ah"]
+            else:
+                mod["cap_ah_corrected"] = None
             # auto-grade the module so the UI can color-code it
             from .pairing import grade_module
             grade, reason = grade_module(mod)

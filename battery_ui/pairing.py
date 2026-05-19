@@ -19,7 +19,17 @@ DEFAULT_THRESHOLDS = {
     "max_pack_cap_spread":  0.5,   # Ah  — block-pair averages must be tighter than this
     "max_pack_ir_spread":   5.0,   # mΩ
     "require_labelled":     1.0,   # >0 = require battery+cell label; 0 = allow unlabelled
+    "use_cutoff_correction": 0.0,  # >0 = treat 6.4V-cutoff modules as cap_ah + 0.10 Ah
+                                   # (saves retest time, accuracy proven by F-12 +50 mAh delta)
 }
+
+
+def _effective_cap(m, thresholds):
+    """Return cap_ah_corrected if cutoff correction is enabled, else raw cap_ah.
+    Single source of truth for "what cap value should pairing use right now?" """
+    if thresholds.get("use_cutoff_correction", 0) > 0 and m.get("cap_ah_corrected") is not None:
+        return m["cap_ah_corrected"]
+    return m.get("cap_ah")
 
 
 # ---------- TREND CLASSIFICATION ----------
@@ -56,7 +66,7 @@ def classify_trend(discharge_caps):
     return "STABLE"
 
 
-def verify_pair(a, b, pack_avg_cap):
+def verify_pair(a, b, pack_avg_cap, thresholds=None):
     """Run industry-standard per-pair verification checks on a block (pair of modules).
     Returns list of check dicts with status (pass/warn/fail), label, value, threshold,
     and source citation. Used to give the user confidence before assembly.
@@ -69,7 +79,9 @@ def verify_pair(a, b, pack_avg_cap):
     if not a or not b:
         return [{"status": "fail", "label": "Pair complete", "detail": "Missing module(s) in pair", "source": "—"}]
 
-    cap_a, cap_b = a.get("cap_ah") or 0, b.get("cap_ah") or 0
+    th = thresholds or DEFAULT_THRESHOLDS
+    cap_a = _effective_cap(a, th) or 0
+    cap_b = _effective_cap(b, th) or 0
     ir_a, ir_b   = a.get("ir_mohm") or 0, b.get("ir_mohm") or 0
     ven_a, ven_b = a.get("v_end") or 0, b.get("v_end") or 0
     trend_a, trend_b = a.get("trend"), b.get("trend")
@@ -246,10 +258,12 @@ def _eligible_with_rejects(modules, thresholds):
             reasons.append("unlabelled (no battery/cell — can't trust identity)")
         if m.get("session_type") == "testing":
             reasons.append("testing/set-aside session (not for pack-building)")
-        if m.get("cap_ah") is None:
+        eff_cap = _effective_cap(m, thresholds)
+        if eff_cap is None:
             reasons.append("no cap data")
-        elif m["cap_ah"] < floor:
-            reasons.append(f"cap {m['cap_ah']:.2f} < {floor} Ah floor")
+        elif eff_cap < floor:
+            adj_note = " (corrected from 6.4V)" if thresholds.get("use_cutoff_correction", 0) > 0 and m.get("stale_cutoff") else ""
+            reasons.append(f"cap {eff_cap:.2f}{adj_note} < {floor} Ah floor")
         if m.get("ir_mohm") is None:
             reasons.append("no IR data")
         elif m["ir_mohm"] > ceil:
@@ -273,21 +287,22 @@ def pair_opposites(modules, target_blocks=14, thresholds=None):
     if len(pool) < needed:
         return None, f"Need {needed} eligible modules, have {len(pool)}"
 
-    # Take the best `needed` modules (top by cap), then pair-opposites within them
-    pool.sort(key=lambda m: -m["cap_ah"])
+    # Take the best `needed` modules (top by effective cap), then pair-opposites within them
+    pool.sort(key=lambda m: -_effective_cap(m, th))
     picked = pool[:needed]
-    picked.sort(key=lambda m: -m["cap_ah"])
+    picked.sort(key=lambda m: -_effective_cap(m, th))
 
     blocks = []
     i, j = 0, len(picked) - 1
     n = 1
     while i < j:
         a, b = picked[i], picked[j]
+        cap_a, cap_b = _effective_cap(a, th), _effective_cap(b, th)
         blocks.append({
             "block_number": n, "a": a, "b": b,
-            "block_cap": round((a["cap_ah"] + b["cap_ah"]) / 2, 3),
+            "block_cap": round((cap_a + cap_b) / 2, 3),
             "block_ir":  round(((a["ir_mohm"] or 0) + (b["ir_mohm"] or 0)) / 2, 1),
-            "cap_gap":   round(abs(a["cap_ah"] - b["cap_ah"]), 3),
+            "cap_gap":   round(abs(cap_a - cap_b), 3),
         })
         i += 1
         j -= 1
@@ -303,17 +318,18 @@ def match_similar(modules, target_blocks=14, thresholds=None):
     if len(pool) < needed:
         return None, f"Need {needed} eligible modules, have {len(pool)}"
 
-    pool.sort(key=lambda m: -m["cap_ah"])
+    pool.sort(key=lambda m: -_effective_cap(m, th))
     picked = pool[:needed]
 
     blocks = []
     for n in range(target_blocks):
         a, b = picked[n * 2], picked[n * 2 + 1]
+        cap_a, cap_b = _effective_cap(a, th), _effective_cap(b, th)
         blocks.append({
             "block_number": n + 1, "a": a, "b": b,
-            "block_cap": round((a["cap_ah"] + b["cap_ah"]) / 2, 3),
+            "block_cap": round((cap_a + cap_b) / 2, 3),
             "block_ir":  round(((a["ir_mohm"] or 0) + (b["ir_mohm"] or 0)) / 2, 1),
-            "cap_gap":   round(abs(a["cap_ah"] - b["cap_ah"]), 3),
+            "cap_gap":   round(abs(cap_a - cap_b), 3),
         })
     return blocks, None
 
@@ -326,19 +342,17 @@ def capacity_only(modules, target_blocks=14, thresholds=None):
     needed = target_blocks * 2
     if len(pool) < needed:
         return None, f"Need {needed} eligible modules, have {len(pool)}"
-    pool.sort(key=lambda m: -m["cap_ah"])
+    pool.sort(key=lambda m: -_effective_cap(m, th))
     picked = pool[:needed]
-    # arbitrary pairing: index 0 with -1, 1 with -2, ... (this is identical to
-    # pair_opposites within the picked set, but we keep it simple here:
-    # adjacent pairs in cap-sorted order = strongest pairs first, then weaker)
     blocks = []
     for n in range(target_blocks):
         a, b = picked[n * 2], picked[n * 2 + 1]
+        cap_a, cap_b = _effective_cap(a, th), _effective_cap(b, th)
         blocks.append({
             "block_number": n + 1, "a": a, "b": b,
-            "block_cap": round((a["cap_ah"] + b["cap_ah"]) / 2, 3),
+            "block_cap": round((cap_a + cap_b) / 2, 3),
             "block_ir":  round(((a["ir_mohm"] or 0) + (b["ir_mohm"] or 0)) / 2, 1),
-            "cap_gap":   round(abs(a["cap_ah"] - b["cap_ah"]), 3),
+            "cap_gap":   round(abs(cap_a - cap_b), 3),
         })
     return blocks, None
 
@@ -386,17 +400,18 @@ GRADE_TIERS = [
 ]
 
 
-def grade_pack(blocks):
+def grade_pack(blocks, thresholds=None):
     """Given a list of block dicts (each with 'a' and 'b' module dicts), produce
-    grade letter, descriptive name, predicted life, and stats.
-    """
+    grade letter, descriptive name, predicted life, and stats. If `thresholds`
+    enables cutoff correction, uses adjusted cap values."""
+    th = thresholds or DEFAULT_THRESHOLDS
     all_modules = []
     for b in blocks:
         for pos in ("a", "b"):
             m = b.get(pos)
             if m:
                 all_modules.append(m)
-    caps = [m["cap_ah"] for m in all_modules if m.get("cap_ah") is not None]
+    caps = [_effective_cap(m, th) for m in all_modules if _effective_cap(m, th) is not None]
     irs  = [m["ir_mohm"] for m in all_modules if m.get("ir_mohm") is not None]
     if not caps:
         return {
@@ -487,23 +502,24 @@ def build_pack(modules, target_blocks=14, strategy="pair_opposites",
     if thermal_placement:
         blocks = apply_thermal_placement(blocks)
 
-    grade_info = grade_pack(blocks)
+    grade_info = grade_pack(blocks, th)
     swap_suggestions = suggest_swaps(blocks, modules, th)
 
-    # Compute pack avg cap for block-uniformity checks
+    # Compute pack avg cap for block-uniformity checks (use effective cap)
     all_caps = []
     for b in blocks:
         for pos in ("a", "b"):
             m = b.get(pos)
-            if m and m.get("cap_ah") is not None:
-                all_caps.append(m["cap_ah"])
+            ec = _effective_cap(m, th) if m else None
+            if ec is not None:
+                all_caps.append(ec)
     pack_avg_cap = sum(all_caps) / len(all_caps) if all_caps else 0
 
     # normalize block_layout to JSON-safe dicts AND run per-block verification
     layout = []
     for b in blocks:
         a_full, b_full = b.get("a"), b.get("b")
-        verifications = verify_pair(a_full, b_full, pack_avg_cap)
+        verifications = verify_pair(a_full, b_full, pack_avg_cap, th)
         # block-level overall verdict
         if any(v["status"] == "fail" for v in verifications):
             block_verdict = "fail"
@@ -694,6 +710,7 @@ def _strip_module(m):
         "battery":     m.get("battery"),
         "cell_position": m.get("cell_position"),
         "cap_ah":      m.get("cap_ah"),
+        "cap_ah_corrected": m.get("cap_ah_corrected"),
         "ir_mohm":     m.get("ir_mohm"),
         "v_end":       m.get("v_end"),
         "trend":       m.get("trend"),

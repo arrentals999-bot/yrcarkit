@@ -1324,6 +1324,7 @@ function readBuildForm() {
     max_pack_cap_spread: parseFloat(f.max_pack_cap_spread.value),
     max_pack_ir_spread:  parseFloat(f.max_pack_ir_spread.value),
     require_labelled:    f.allow_unlabelled.checked ? 0 : 1,  // checkbox flips the flag
+    use_cutoff_correction: f.use_cutoff_correction?.checked ? 1 : 0,
     pack_name:         f.pack_name.value.trim(),
     destination:       f.destination.value,
   };
@@ -1519,7 +1520,11 @@ function renderPreInstallChecklist(pack) {
 function moduleCell(m) {
   if (!m) return "<em>—</em>";
   const tag = m.battery ? `${m.battery}-${m.cell_position}` : `(${m.session_key} CH${m.channel})`;
-  return `<strong>${tag}</strong> <span style="color:var(--muted)">${fmt(m.cap_ah)}Ah ${fmt(m.ir_mohm,1)}mΩ</span> ${trendBadge(m.trend, {small: true})} ${cutoffBadge(m)}`;
+  let capDisplay = `${fmt(m.cap_ah)}Ah`;
+  if (m.stale_cutoff && m.cap_ah_corrected != null && m.cap_ah_corrected !== m.cap_ah) {
+    capDisplay += ` <span style="color:#92400e;font-size:10px" title="Corrected for 6.0V cutoff (+100 mAh estimate based on F-12 calibration)">≈${fmt(m.cap_ah_corrected)}Ah*</span>`;
+  }
+  return `<strong>${tag}</strong> <span style="color:var(--muted)">${capDisplay} ${fmt(m.ir_mohm,1)}mΩ</span> ${trendBadge(m.trend, {small: true})} ${cutoffBadge(m)}`;
 }
 
 // Cutoff badge — visually distinguish modules tested at old 6.4V cutoff (needs retest)
