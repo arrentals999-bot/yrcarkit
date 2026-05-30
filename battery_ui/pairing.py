@@ -14,6 +14,9 @@ from statistics import mean, stdev
 
 DEFAULT_THRESHOLDS = {
     "cap_floor_reuse":      3.0,   # Ah  — modules below this are not eligible
+    "cap_ceiling_reuse":    0.0,   # Ah  — modules above this are excluded (0 = no ceiling).
+                                   # Used to trim cap outliers that would inflate pack spread
+                                   # (e.g. one 5.3 Ah F-12 wrecks Grade D for the other 27).
     "cap_ideal":            4.0,   # Ah  — preferred lower bound for "Good" tier
     "ir_ceiling_module":    25.0,  # mΩ DC, per-module
     "max_pack_cap_spread":  0.5,   # Ah  — block-pair averages must be tighter than this
@@ -259,11 +262,14 @@ def _eligible_with_rejects(modules, thresholds):
         if m.get("session_type") == "testing":
             reasons.append("testing/set-aside session (not for pack-building)")
         eff_cap = _effective_cap(m, thresholds)
+        ceiling = thresholds.get("cap_ceiling_reuse", 0) or 0
         if eff_cap is None:
             reasons.append("no cap data")
         elif eff_cap < floor:
             adj_note = " (corrected from 6.4V)" if thresholds.get("use_cutoff_correction", 0) > 0 and m.get("stale_cutoff") else ""
             reasons.append(f"cap {eff_cap:.2f}{adj_note} < {floor} Ah floor")
+        elif ceiling > 0 and eff_cap > ceiling:
+            reasons.append(f"cap {eff_cap:.2f} > {ceiling} Ah ceiling (outlier — would inflate pack spread)")
         if m.get("ir_mohm") is None:
             reasons.append("no IR data")
         elif m["ir_mohm"] > ceil:
