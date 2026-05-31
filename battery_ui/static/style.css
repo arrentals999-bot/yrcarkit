@@ -711,3 +711,11 @@ footer button { background: none; border: 1px solid var(--border); padding: 4px 
 .cutoff-banner.fail { background: #fef2f2; border-color: #dc2626; color: #7f1d1d; }
 .cutoff-banner ul { padding-left: 20px; }
 .cutoff-banner li { margin: 3px 0; }
+
+/* ----- BUDGET PACK GRADE Z ----- */
+.pack-grade.Z, .module-grade.Z {
+  background: linear-gradient(135deg, #6b21a8, #9333ea);
+  color: white;
+  border: 1px solid #581c87;
+}
+:root { --grade-Z: #9333ea; }

@@ -24,6 +24,10 @@ DEFAULT_THRESHOLDS = {
     "require_labelled":     1.0,   # >0 = require battery+cell label; 0 = allow unlabelled
     "use_cutoff_correction": 0.0,  # >0 = treat 6.4V-cutoff modules as cap_ah + 0.10 Ah
                                    # (saves retest time, accuracy proven by F-12 +50 mAh delta)
+    "budget_mode":          0.0,   # >0 = grade as BUDGET pack (low-cap matched).
+                                   # In this mode: weakest 2.0-3.0 OK if spread<=0.25,
+                                   # all trends must be IMPROVING/STABLE, IR spread <=3.
+                                   # Predicted life 6-12mo for city driving, no P0A80.
 }
 
 
@@ -406,11 +410,93 @@ GRADE_TIERS = [
 ]
 
 
+def _grade_budget_pack(blocks, th):
+    """Grade a low-cap matched 'budget' pack. Uses TIGHT matching criteria:
+    cap spread <=0.25, IR spread <=3, all IMPROVING/STABLE trends.
+    Returns Z-tier grades (Z1=best budget, Z2=acceptable, F=will fail).
+    """
+    all_modules = []
+    for b in blocks:
+        for pos in ("a", "b"):
+            m = b.get(pos)
+            if m:
+                all_modules.append(m)
+    caps = [_effective_cap(m, th) for m in all_modules if _effective_cap(m, th) is not None]
+    irs = [m["ir_mohm"] for m in all_modules if m.get("ir_mohm") is not None]
+    if not caps:
+        return {"grade": "F", "grade_name": "Don't ship", "predicted_life": "—",
+                "avg_cap": 0, "cap_spread": 0, "weakest_cap": 0,
+                "avg_ir": 0, "ir_spread": 0, "issue_count": 0,
+                "reasons": ["No usable modules"]}
+
+    weakest_cap = min(caps)
+    cap_spread  = max(caps) - min(caps)
+    avg_cap     = round(mean(caps), 3)
+    avg_ir      = round(mean(irs), 1) if irs else 0
+    ir_spread   = round(max(irs) - min(irs), 1) if irs else 0
+    bad_trends  = sum(1 for m in all_modules if m.get("trend") not in ("IMPROVING", "STABLE"))
+
+    reasons = []
+    if bad_trends > 0:
+        reasons.append(f"{bad_trends} module(s) not IMPROVING/STABLE — budget packs need all-clean trends")
+    if weakest_cap < 2.0:
+        reasons.append(f"weakest cap {weakest_cap:.2f} below 2.0 Ah budget floor — will fail early")
+    if cap_spread > 0.25:
+        reasons.append(f"cap spread {cap_spread:.2f} > 0.25 Ah — too wide for low-cap pack, will P0A80")
+    if ir_spread > 3:
+        reasons.append(f"IR spread {ir_spread:.1f} > 3 mΩ — uneven voltage sag, will P0A80")
+
+    if reasons:
+        return {
+            "grade": "F", "grade_name": "Don't ship as budget pack",
+            "predicted_life": "Weeks before P0A80",
+            "avg_cap": avg_cap, "cap_spread": round(cap_spread, 3),
+            "weakest_cap": round(weakest_cap, 3),
+            "avg_ir": avg_ir, "ir_spread": ir_spread,
+            "issue_count": bad_trends,
+            "reasons": reasons,
+        }
+
+    # Sub-tiers within budget
+    if weakest_cap >= 2.5 and cap_spread <= 0.20 and ir_spread <= 2.5:
+        life = "10-14 months (city/short trips, MPG -3 to -5)"
+        tier_name = "Budget+ — well-matched low-cap"
+    elif weakest_cap >= 2.25 and cap_spread <= 0.25:
+        life = "6-10 months (city/short trips, MPG -4 to -7)"
+        tier_name = "Budget — matched low-cap"
+    else:
+        life = "4-8 months (city only, MPG -5 to -8)"
+        tier_name = "Budget- — minimal matched low-cap"
+
+    return {
+        "grade": "Z", "grade_name": tier_name,
+        "predicted_life": life,
+        "avg_cap": avg_cap, "cap_spread": round(cap_spread, 3),
+        "weakest_cap": round(weakest_cap, 3),
+        "avg_ir": avg_ir, "ir_spread": ir_spread,
+        "issue_count": 0,
+        "reasons": [
+            "BUDGET PACK — disclose to customer:",
+            "• Reduced electric assist (no highway EV-only mode)",
+            "• MPG drops 3-8 vs OEM pack",
+            "• Service life shorter than standard rebuild",
+            "• Performs best for city/short-commute driving",
+        ],
+    }
+
+
 def grade_pack(blocks, thresholds=None):
     """Given a list of block dicts (each with 'a' and 'b' module dicts), produce
     grade letter, descriptive name, predicted life, and stats. If `thresholds`
-    enables cutoff correction, uses adjusted cap values."""
+    enables cutoff correction, uses adjusted cap values.
+
+    If thresholds enables budget_mode, grades by BUDGET tier criteria instead:
+    tight matching at lower cap (≤0.25 Ah spread, all IMPROVING/STABLE trend,
+    tight IR). Returns grade='Z' / "Budget — limited service".
+    """
     th = thresholds or DEFAULT_THRESHOLDS
+    if th.get("budget_mode", 0) > 0:
+        return _grade_budget_pack(blocks, th)
     all_modules = []
     for b in blocks:
         for pos in ("a", "b"):

@@ -183,6 +183,7 @@
       <label><input type="checkbox" name="allow_borrow" checked> Allow borrowing from other labelled batteries</label>
       <label><input type="checkbox" name="allow_unlabelled"> <strong>Include unlabelled (legacy) modules</strong> — risky, you don't know which physical module each was</label>
       <label title="Old 6.4V sessions under-report cap by ~50-100 mAh vs the industry-standard 6.0V cutoff. Based on F-12 (your own data: 5.26 -> 5.31 = +50 mAh), we apply a conservative +100 mAh adjustment. Saves you hours of retesting D and H batt."><input type="checkbox" name="use_cutoff_correction"> <strong>Approximate 6.4V cutoff modules (+100 mAh)</strong> — skip retesting D and H batt, use measured + correction</label>
+      <label title="Budget mode uses tight matching of low-cap modules (2.0-3.0 Ah) to build a 'city driver' pack that won't throw P0A80. Pack has reduced electric assist and lower MPG but works. Sell at $300-500 with disclosure."><input type="checkbox" name="budget_mode"> <strong>Budget pack mode (low-cap matched)</strong> — uses 2.0-3.0 Ah modules with tight matching; ships as Grade Z "city driver" pack ($300-500)</label>
       <label>Strategy:
         <select name="strategy">
           <option value="pair_opposites" selected>Pair-opposites (recommended for daily-driver)</option>

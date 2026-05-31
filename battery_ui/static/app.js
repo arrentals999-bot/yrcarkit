@@ -1325,6 +1325,7 @@ function readBuildForm() {
     max_pack_ir_spread:  parseFloat(f.max_pack_ir_spread.value),
     require_labelled:    f.allow_unlabelled.checked ? 0 : 1,  // checkbox flips the flag
     use_cutoff_correction: f.use_cutoff_correction?.checked ? 1 : 0,
+    budget_mode:       f.budget_mode?.checked ? 1 : 0,
     pack_name:         f.pack_name.value.trim(),
     destination:       f.destination.value,
   };
