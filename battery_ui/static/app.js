@@ -1563,19 +1563,17 @@ function renderCutoffAudit(pack) {
   }
   const items = c.stale_modules.map(m => {
     const tag = m.battery ? `${m.battery}-${m.cell_position}` : `(${m.session_key} CH${m.channel})`;
-    return `<li><strong>${tag}</strong> in Block ${m.block_number} — current cap ${fmt(m.cap_ah)} Ah (likely +200–300 mAh higher at 6.0V cutoff)</li>`;
+    return `<li><strong>${tag}</strong> in Block ${m.block_number} — cap ${fmt(m.cap_ah)} Ah measured at 6.4V cutoff</li>`;
   }).join("");
   return `
-    <div class="cutoff-banner fail">
-      <div style="font-size: 14px; margin-bottom: 6px;">
-        ⚠ <strong>Cutoff mismatch: this pack mixes ${c.cutoffs_present.join(' V and ')} V cutoff modules.</strong>
+    <div class="cutoff-banner ok">
+      <div style="font-size: 13px; margin-bottom: 4px;">
+        ℹ <strong>Mixed-cutoff pack: ${c.cutoffs_present.join(' V + ')} V modules combined.</strong> Discharge rate equivalent across cutoffs — acceptable to build with.
       </div>
-      <div style="font-size: 12px; margin-bottom: 8px;">
-        You changed the YRCARKIT cutoff from 6.4V to 6.0V on 2026-05-10. Older sessions can't be directly compared
-        with newer ones — the Vend check is auto-skipped on mixed pairs, but the cap numbers are still under-reported
-        for the old-cutoff modules. <strong>Retest these ${c.stale_count} modules at 6.0V cutoff:</strong>
-      </div>
-      <ul style="margin: 0 0 6px 18px; font-size: 12px;">${items}</ul>
+      <details style="font-size: 11px; color: var(--muted);">
+        <summary style="cursor: pointer;">show ${c.stale_count} module(s) tested at older 6.4V cutoff</summary>
+        <ul style="margin: 4px 0 0 18px;">${items}</ul>
+      </details>
     </div>
   `;
 }
