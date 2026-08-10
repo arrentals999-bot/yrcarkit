@@ -1010,4 +1010,4 @@ if __name__ == "__main__":
     # Skip the browser-pop in headless mode (auto-start at logon, etc.)
     if not os.environ.get("BATTERY_UI_NO_BROWSER"):
         Timer(1.5, _open_browser).start()
-    app.run(host="127.0.0.1", port=5000, debug=False)
+    app.run(host="127.0.0.1", port=5000, debug=False, threaded=True)
